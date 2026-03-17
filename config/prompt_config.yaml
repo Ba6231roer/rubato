@@ -1,0 +1,8 @@
+prompts:
+  system_prompt_file: "prompts/system_prompt.txt"
+  skill_loading_prompt_file: "prompts/skill_loading_prompt.txt"
+
+variables:
+  project_name: "Rubato"
+  default_browser: "chromium"
+  default_timeout: 30000

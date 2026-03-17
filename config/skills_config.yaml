@@ -1,0 +1,11 @@
+skills:
+  directory: "skills"
+  
+  auto_load: true
+  
+  enabled_skills:
+    - test-execution
+  
+  skill_loading:
+    trigger_matching: true
+    max_loaded_skills: 3

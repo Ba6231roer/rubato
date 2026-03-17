@@ -1,0 +1,27 @@
+mcp:
+  playwright:
+    enabled: true
+    command: "npx.cmd"
+    args: 
+      - "-y"
+      - "@playwright/mcp"
+      - "--isolated"
+      - "--caps=testing"
+    
+    connection:
+      retry_times: 3
+      retry_delay: 5
+      timeout: 30
+    
+    browser:
+      type: "chromium"
+      headless: false
+      viewport:
+        width: 1280
+        height: 720
+      
+    execution:
+      default_timeout: 30000
+      slow_mo: 0
+      video_dir: "logs/videos"
+      screenshot_dir: "logs/screenshots"

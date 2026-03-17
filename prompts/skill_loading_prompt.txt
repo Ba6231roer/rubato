@@ -1,0 +1,8 @@
+# 当前加载的Skill
+
+## {skill_name}
+
+{skill_content}
+
+---
+请根据这个Skill的指导，处理用户的请求。

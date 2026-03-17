@@ -1,0 +1,178 @@
+import logging
+import json
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Optional
+import sys
+
+
+class LLMLogger:
+    """LLM请求/响应日志记录器"""
+    
+    def __init__(self, log_dir: str = "logs"):
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        
+        self._setup_loggers()
+    
+    def _setup_loggers(self):
+        """设置多个日志记录器"""
+        self.llm_logger = self._create_logger(
+            "llm",
+            self.log_dir / "llm.log",
+            "%(asctime)s | %(levelname)s | %(message)s"
+        )
+        
+        self.tool_logger = self._create_logger(
+            "tool",
+            self.log_dir / "tool.log",
+            "%(asctime)s | %(levelname)s | %(message)s"
+        )
+        
+        self.agent_logger = self._create_logger(
+            "agent",
+            self.log_dir / "agent.log",
+            "%(asctime)s | %(levelname)s | %(message)s"
+        )
+    
+    def _create_logger(self, name: str, file_path: Path, format_str: str) -> logging.Logger:
+        """创建日志记录器"""
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.DEBUG)
+        logger.handlers = []
+        
+        file_handler = logging.FileHandler(file_path, encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter(format_str))
+        logger.addHandler(file_handler)
+        
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(logging.INFO)
+        console_handler.setFormatter(logging.Formatter(format_str))
+        logger.addHandler(console_handler)
+        
+        return logger
+    
+    def log_request(self, messages: list, model: str, **kwargs):
+        """记录LLM请求"""
+        request_data = {
+            "type": "request",
+            "model": model,
+            "message_count": len(messages),
+            "messages": self._serialize_messages(messages),
+            "extra": kwargs
+        }
+        self.llm_logger.info(f"REQUEST: {json.dumps(request_data, ensure_ascii=False, indent=2)}")
+    
+    def log_response(self, response: Any, model: str):
+        """记录LLM响应"""
+        response_data = {
+            "type": "response",
+            "model": model,
+            "response": self._serialize_response(response)
+        }
+        self.llm_logger.info(f"RESPONSE: {json.dumps(response_data, ensure_ascii=False, indent=2)}")
+    
+    def log_tool_call(self, tool_name: str, arguments: dict):
+        """记录工具调用"""
+        call_data = {
+            "type": "tool_call",
+            "tool": tool_name,
+            "arguments": arguments
+        }
+        self.tool_logger.info(f"TOOL_CALL: {json.dumps(call_data, ensure_ascii=False, indent=2)}")
+    
+    def log_tool_result(self, tool_name: str, result: Any, error: Optional[str] = None):
+        """记录工具结果"""
+        result_data = {
+            "type": "tool_result",
+            "tool": tool_name,
+            "error": error,
+            "result": self._truncate(str(result), 2000)
+        }
+        self.tool_logger.info(f"TOOL_RESULT: {json.dumps(result_data, ensure_ascii=False, indent=2)}")
+    
+    def log_agent_thinking(self, thought: str):
+        """记录Agent思考过程"""
+        self.agent_logger.info(f"THINKING: {thought}")
+    
+    def log_agent_action(self, action: str, details: dict = None):
+        """记录Agent行动"""
+        action_data = {
+            "action": action,
+            "details": details or {}
+        }
+        self.agent_logger.info(f"ACTION: {json.dumps(action_data, ensure_ascii=False)}")
+    
+    def log_error(self, source: str, error: Exception):
+        """记录错误"""
+        error_data = {
+            "source": source,
+            "error_type": type(error).__name__,
+            "error_message": str(error)
+        }
+        self.agent_logger.error(f"ERROR: {json.dumps(error_data, ensure_ascii=False)}")
+    
+    def _serialize_messages(self, messages: list) -> list:
+        """序列化消息列表"""
+        result = []
+        for msg in messages:
+            msg_dict = {
+                "type": getattr(msg, "type", "unknown"),
+                "content": self._truncate(self._get_content(msg), 500)
+            }
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                msg_dict["tool_calls"] = [
+                    {"name": tc["name"], "args": tc["args"]}
+                    for tc in msg.tool_calls
+                ]
+            if hasattr(msg, "tool_call_id"):
+                msg_dict["tool_call_id"] = msg.tool_call_id
+            result.append(msg_dict)
+        return result
+    
+    def _serialize_response(self, response: Any) -> dict:
+        """序列化响应"""
+        if hasattr(response, "content"):
+            return {
+                "content": self._truncate(str(response.content), 1000),
+                "tool_calls": [
+                    {"name": tc["name"], "args": tc["args"]}
+                    for tc in (response.tool_calls or [])
+                ] if hasattr(response, "tool_calls") else []
+            }
+        return {"raw": self._truncate(str(response), 1000)}
+    
+    def _get_content(self, msg) -> str:
+        """获取消息内容"""
+        if hasattr(msg, "content"):
+            content = msg.content
+            if isinstance(content, str):
+                return content
+            elif isinstance(content, list):
+                parts = []
+                for item in content:
+                    if isinstance(item, str):
+                        parts.append(item)
+                    elif isinstance(item, dict) and "text" in item:
+                        parts.append(item["text"])
+                return " ".join(parts)
+            return str(content)
+        return str(msg)
+    
+    def _truncate(self, text: str, max_len: int) -> str:
+        """截断文本"""
+        if len(text) > max_len:
+            return text[:max_len] + "...[truncated]"
+        return text
+
+
+_llm_logger: Optional[LLMLogger] = None
+
+
+def get_llm_logger(log_dir: str = "logs") -> LLMLogger:
+    """获取全局LLM日志记录器"""
+    global _llm_logger
+    if _llm_logger is None:
+        _llm_logger = LLMLogger(log_dir)
+    return _llm_logger
