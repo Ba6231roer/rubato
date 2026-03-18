@@ -1,7 +1,8 @@
-from typing import Dict, Callable, Optional
+from typing import Dict, Callable, Optional, Awaitable
 from ..core.agent import RubatoAgent
 from ..skills.loader import SkillLoader
 from ..mcp.client import MCPManager
+import asyncio
 
 
 class CommandHandler:
@@ -26,6 +27,7 @@ class CommandHandler:
             'skill': self._cmd_skill,
             'tool': self._cmd_tool,
             'prompt': self._cmd_prompt,
+            'browser': self._cmd_browser,
         }
         self._running = True
     
@@ -33,8 +35,8 @@ class CommandHandler:
         """检查是否继续运行"""
         return self._running
     
-    def handle(self, user_input: str) -> Optional[str]:
-        """处理用户输入"""
+    async def handle_async(self, user_input: str) -> Optional[str]:
+        """异步处理用户输入"""
         user_input = user_input.strip()
         
         if not user_input:
@@ -46,7 +48,32 @@ class CommandHandler:
             args = cmd_parts[1] if len(cmd_parts) > 1 else ""
             
             if cmd in self.commands:
-                return self.commands[cmd](args)
+                result = self.commands[cmd](args)
+                if asyncio.iscoroutine(result):
+                    return await result
+                return result
+            else:
+                return f"未知命令：{cmd}。输入 /help 查看帮助。"
+        
+        return None
+    
+    def handle(self, user_input: str) -> Optional[str]:
+        """同步处理用户输入（向后兼容）"""
+        user_input = user_input.strip()
+        
+        if not user_input:
+            return None
+        
+        if user_input.startswith('/'):
+            cmd_parts = user_input[1:].split(maxsplit=1)
+            cmd = cmd_parts[0].lower()
+            args = cmd_parts[1] if len(cmd_parts) > 1 else ""
+            
+            if cmd in self.commands:
+                result = self.commands[cmd](args)
+                if asyncio.iscoroutine(result):
+                    return "此命令需要异步执行，请使用 handle_async"
+                return result
             else:
                 return f"未知命令：{cmd}。输入 /help 查看帮助。"
         
@@ -65,6 +92,9 @@ class CommandHandler:
   /skill show <name> - 显示Skill详情
   /tool list     - 列出所有可用工具
   /prompt show   - 显示当前系统提示词
+  /browser status - 查看浏览器状态
+  /browser close  - 关闭浏览器
+  /browser reopen - 重新打开浏览器
 
 直接输入问题与Agent对话。
 """
@@ -178,3 +208,36 @@ class CommandHandler:
         
         else:
             return "用法：/prompt show"
+    
+    async def _cmd_browser(self, args: str) -> str:
+        """浏览器相关命令"""
+        parts = args.split(maxsplit=1)
+        sub_cmd = parts[0].lower() if parts else ""
+        
+        if not self.mcp_manager:
+            return "MCP未启用，无法管理浏览器"
+        
+        if sub_cmd == "status":
+            if not self.mcp_manager.is_connected:
+                return "MCP未连接"
+            
+            alive = await self.mcp_manager.check_browser_alive()
+            status = "运行中" if alive else "已关闭"
+            return f"浏览器状态: {status}"
+        
+        elif sub_cmd == "close":
+            if not self.mcp_manager.is_connected:
+                return "MCP未连接"
+            
+            success = await self.mcp_manager.close_browser()
+            return "浏览器已关闭" if success else "关闭浏览器失败"
+        
+        elif sub_cmd == "reopen":
+            if not self.mcp_manager.is_connected:
+                return "MCP未连接"
+            
+            success = await self.mcp_manager.ensure_browser()
+            return "浏览器已重新打开" if success else "重新打开浏览器失败"
+        
+        else:
+            return "用法：/browser status | /browser close | /browser reopen"

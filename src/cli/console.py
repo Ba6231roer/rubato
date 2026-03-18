@@ -27,7 +27,7 @@ class Console:
         """打印欢迎横幅"""
         print()
         print("╔══════════════════════════════════════════════════════════╗")
-        print("║           Rubato - 提示词驱动的智能体框架                   ║")
+        print("║                       Rubato                             ║")
         print("╠══════════════════════════════════════════════════════════╣")
         
         status_parts = []
@@ -36,6 +36,9 @@ class Console:
         if self.mcp_manager:
             mcp_status = "已连接" if self.mcp_manager.is_connected else "未连接"
             status_parts.append(f"MCP: {mcp_status}")
+            if self.mcp_manager.is_connected:
+                browser_status = "运行中" if self.mcp_manager.browser_alive else "已关闭"
+                status_parts.append(f"浏览器: {browser_status}")
         
         if status_parts:
             print(f"║ 状态: {' | '.join(status_parts)}")
@@ -66,7 +69,7 @@ class Console:
                 if not user_input:
                     continue
                 
-                cmd_result = self.command_handler.handle(user_input)
+                cmd_result = await self.command_handler.handle_async(user_input)
                 if cmd_result is not None:
                     print(cmd_result)
                     continue

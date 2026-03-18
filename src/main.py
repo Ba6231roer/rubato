@@ -39,7 +39,8 @@ async def run_with_mcp(config, skill_loader, context_manager) -> None:
         agent = RubatoAgent(
             config=config,
             skill_loader=skill_loader,
-            context_manager=context_manager
+            context_manager=context_manager,
+            mcp_manager=mcp_manager
         )
         
         console = Console(
@@ -76,7 +77,7 @@ async def main_async() -> None:
     
     print()
     print("=" * 60)
-    print("  Rubato - 基于LangGraph的提示词驱动智能体框架")
+    print("  Rubato - 自然语言驱动的自动化测试执行框架")
     print("=" * 60)
     print()
     

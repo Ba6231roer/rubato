@@ -101,7 +101,7 @@ def _convert_messages_for_api(messages: List) -> List:
 
 
 class RubatoAgent:
-    """提示词驱动的ReAct Agent"""
+    """自然语言驱动的自动化测试执行 Agent"""
     
     MAX_CONTEXT_TOKENS = 80000
     
@@ -109,11 +109,13 @@ class RubatoAgent:
         self, 
         config: AppConfig,
         skill_loader: SkillLoader,
-        context_manager: ContextManager
+        context_manager: ContextManager,
+        mcp_manager = None
     ):
         self.config = config
         self.skill_loader = skill_loader
         self.context_manager = context_manager
+        self.mcp_manager = mcp_manager
         self.logger = get_llm_logger()
         
         self.llm = self._create_llm()
@@ -214,6 +216,11 @@ class RubatoAgent:
     async def run(self, user_input: str) -> str:
         """运行Agent，使用流式处理记录每个步骤"""
         self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
+        
+        if self.mcp_manager and self.mcp_manager.is_connected:
+            browser_ok = await self.mcp_manager.ensure_browser()
+            if not browser_ok:
+                return "浏览器初始化失败，请检查 MCP 连接"
         
         skill_name = self.skill_loader.find_matching_skill(user_input)
         
