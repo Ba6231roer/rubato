@@ -20,7 +20,7 @@ class SkillLoader:
         if not self.skills_dir.exists():
             return skills
         
-        for skill_file in self.skills_dir.glob("*.md"):
+        for skill_file in self.skills_dir.rglob("*.md"):
             try:
                 metadata, content = self.parser.parse_file(skill_file)
                 if metadata.name:

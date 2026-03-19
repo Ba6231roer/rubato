@@ -7,7 +7,7 @@
 ## 1. 环境要求
 
 - **Python**: 3.12+
-- **Node.js**: 18+ (用于运行 Playwright MCP)
+- **Node.js**: 18+ (用于运行 Playwright CLI)
 - **操作系统**: Windows / macOS / Linux
 
 ---
@@ -21,14 +21,14 @@ cd rubato
 pip install -r requirements.txt
 ```
 
-### 2.2 安装 Playwright MCP
+### 2.2 安装 Playwright CLI
 
 ```bash
-# 全局安装 Playwright MCP 服务器
-npm install -g @playwright/mcp
+# 全局安装 Playwright CLI
+npm install -g @playwright/cli@latest
 
-# 或者使用 npx 直接运行（推荐，无需全局安装）
-npx -y @playwright/mcp
+# 验证安装
+playwright-cli --help
 ```
 
 ### 2.3 安装 Playwright 浏览器（首次使用）
@@ -70,31 +70,7 @@ model:
   max_tokens: 2000
 ```
 
-### 3.2 配置 MCP 服务器
-
-编辑 `config/mcp_config.yaml`：
-
-```yaml
-mcp:
-  playwright:
-    enabled: true
-    command: "npx"
-    args: ["-y", "@playwright/mcp"]
-    
-    connection:
-      retry_times: 3      # 连接重试次数
-      retry_delay: 5      # 重试间隔（秒）
-      timeout: 30         # 连接超时（秒）
-    
-    browser:
-      type: "chromium"    # chromium / firefox / webkit
-      headless: false     # true=无头模式，false=显示浏览器
-      viewport:
-        width: 1280
-        height: 720
-```
-
-### 3.3 配置 Skills（可选）
+### 3.2 配置 Skills（可选）
 
 编辑 `config/skills_config.yaml` 启用/禁用特定 Skill：
 
@@ -103,6 +79,7 @@ skills:
   directory: "skills"
   auto_load: true
   enabled_skills:
+    - playwright-cli
     - test-execution
   skill_loading:
     trigger_matching: true
@@ -128,8 +105,7 @@ python src/main.py
 ╔══════════════════════════════════════════════════════════╗
 ║                       Rubato                             ║
 ╠══════════════════════════════════════════════════════════╣
-║ 状态: 模型: gpt-4 | MCP: 已连接
-║ 已加载Skills: test-execution
+║ 状态: 模型: gpt-4 | Skills: playwright-cli, test-execution
 ╚══════════════════════════════════════════════════════════╝
 
 输入 '/help' 查看帮助，'/quit' 退出
@@ -149,7 +125,7 @@ python src/main.py
 
 Agent 会自动：
 1. 导航到百度首页
-2. 调用子Agent分析页面快照
+2. 获取页面快照并分析元素
 3. 识别搜索框和搜索按钮
 4. 输入 "Python" 并搜索
 5. 截图并返回结果
@@ -168,81 +144,50 @@ Agent 会自动：
 
 ---
 
-## 6. 子Agent自动调用机制
+## 6. Playwright CLI 工作流程
 
-Rubato 会在需要时**自动调用子Agent**进行页面快照分析：
+Rubato 使用 Playwright CLI 进行浏览器自动化，具有以下优势：
 
-### 触发条件
+### Token 效率高
 
-当主Agent执行以下操作时，会自动调用 `snapshot-analyzer` 子Agent：
+| 操作 | MCP 方式 | CLI 方式 |
+|------|---------|---------|
+| 工具定义加载 | ~10000 tokens | ~2500 tokens |
+| Snapshot 输出 | ~3000 tokens | ~300 tokens |
+| 单次交互总消耗 | ~15000 tokens | ~3000 tokens |
 
-1. **导航到新页面后** - 分析页面结构
-2. **需要定位元素时** - 识别可交互元素
-3. **操作失败后** - 重新分析页面状态
-
-### 子Agent返回内容
-
-`snapshot-analyzer` 子Agent会返回：
-
-```json
-{
-  "page_layout": {
-    "title": "百度一下，你就知道",
-    "main_sections": ["搜索区域", "导航链接"],
-    "page_type": "搜索页"
-  },
-  "interactive_elements": [
-    {
-      "id": "s1",
-      "type": "input",
-      "description": "搜索输入框",
-      "selector": "#kw",
-      "visible_text": ""
-    },
-    {
-      "id": "s2", 
-      "type": "button",
-      "description": "百度一下搜索按钮",
-      "selector": "#su",
-      "visible_text": "百度一下"
-    }
-  ],
-  "next_action_recommendation": {
-    "element_id": "s1",
-    "action_type": "type",
-    "action_value": "Python",
-    "reason": "根据任务需要在搜索框输入搜索内容"
-  }
-}
-```
-
-### 工作流程图
+### 工作流程
 
 ```
 用户输入自然语言测试案例
         ↓
     主Agent分析任务
         ↓
-  browser_navigate 导航到目标页面
+  playwright-cli open 打开浏览器
         ↓
-  browser_snapshot 获取页面快照
+  playwright-cli snapshot 获取页面快照
         ↓
-┌─────────────────────────────────────┐
-│   spawn_agent("snapshot-analyzer")  │
-│   ┌─────────────────────────────┐   │
-│   │ 子Agent独立分析快照：        │   │
-│   │ 1. 页面布局概况              │   │
-│   │ 2. 可交互元素清单            │   │
-│   │ 3. 下一步操作推荐            │   │
-│   └─────────────────────────────┘   │
-└─────────────────────────────────────┘
+    主Agent直接分析快照（无需调用子Agent）
         ↓
-    返回分析结果给主Agent
+    playwright-cli type/click 执行操作
         ↓
-    主Agent执行推荐操作
+    playwright-cli screenshot 截图
         ↓
-    继续下一步或完成
+    返回结果
 ```
+
+### 常用命令
+
+| 命令 | 说明 |
+|------|------|
+| `playwright-cli open <url> --headed` | 打开浏览器并导航 |
+| `playwright-cli snapshot` | 获取页面快照 |
+| `playwright-cli click <ref>` | 点击元素 |
+| `playwright-cli type "<text>"` | 输入文本 |
+| `playwright-cli press <key>` | 按键 |
+| `playwright-cli screenshot` | 截图 |
+| `playwright-cli list` | 列出所有 session |
+| `playwright-cli close-all` | 关闭所有浏览器 |
 
 ---
 
@@ -264,16 +209,17 @@ Rubato 会在需要时**自动调用子Agent**进行页面快照分析：
 
 ## 8. 常见问题
 
-### Q1: MCP 连接失败
+### Q1: Playwright CLI 未安装
 
 ```
-错误：无法连接MCP服务器
+错误：'playwright-cli' 不是内部或外部命令
 ```
 
 **解决方案**：
-1. 确保已安装 Node.js 18+
-2. 运行 `npx -y @playwright/mcp` 测试
-3. 检查网络连接和防火墙设置
+```bash
+npm install -g @playwright/cli@latest
+playwright-cli --help
+```
 
 ### Q2: API 密钥无效
 
@@ -299,9 +245,9 @@ npx playwright install chromium
 ### Q4: 元素定位失败
 
 **解决方案**：
-- Agent 会自动尝试多种选择器
+- Agent 会自动获取 snapshot 分析页面
 - 可以在对话中提供更精确的元素描述
-- 子Agent会分析页面快照并推荐最佳选择器
+- Playwright CLI 的 snapshot 输出简洁，Agent 可直接分析
 
 ---
 
@@ -344,6 +290,8 @@ version: 1.0
 triggers:
   - 触发词1
   - 触发词2
+tools:
+  - ShellTool
 ---
 
 # My Skill
@@ -366,7 +314,6 @@ rubato/
 │   ├── core/              # 核心模块
 │   │   ├── agent.py       # 主Agent
 │   │   └── sub_agents.py  # 子Agent机制
-│   ├── mcp/               # MCP集成
 │   ├── skills/            # Skill系统
 │   ├── context/           # 上下文管理
 │   ├── config/            # 配置管理
@@ -374,6 +321,7 @@ rubato/
 ├── config/                # 配置文件
 ├── prompts/               # 提示词
 ├── skills/                # Skill文件
+│   └── playwright-cli/    # Playwright CLI Skill
 ├── sub_agents/            # 子Agent配置
 ├── logs/                  # 日志目录
 └── tests/                 # 测试文件
@@ -389,3 +337,11 @@ rubato/
 4. 创建自定义子Agent处理特定场景
 
 **祝你使用愉快！** 🚀
+
+---
+
+## 附录：使用 Playwright MCP（可选）
+
+如果你需要使用 Playwright MCP 作为替代方案，请参考 [Playwright MCP 配置指南](dev_docs/playwright-mcp-setup.md)。
+
+**注意**: Playwright MCP 的 token 消耗较高，推荐使用默认的 Playwright CLI 方案。

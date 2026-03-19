@@ -1,6 +1,6 @@
 mcp:
   playwright:
-    enabled: true
+    enabled: false
     command: "npx.cmd"
     args: 
       - "-y"
