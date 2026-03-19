@@ -63,4 +63,5 @@ __pycache__/
 logs/
 venv/
 dev_docs/
-config/model_config.yaml
+.playwright-cli/
+skills/playwright-cli/
