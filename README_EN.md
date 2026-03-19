@@ -16,7 +16,7 @@
 
 ## Introduction
 
-Rubato is a natural language-driven automated test execution framework. Users simply describe test scenarios in natural language, and the agent automatically parses the intent, plans the steps, and executes tests through browser automation tools. It supports Playwright MCP tool calling, dynamic Skill loading, multi-agent collaboration, and context compression.
+Rubato is a natural language-driven automated test execution framework. Users simply describe test scenarios in natural language, and the agent automatically parses the intent, plans the steps, and executes tests through browser automation tools. It supports Playwright CLI tool calling, dynamic Skill loading, multi-agent collaboration, and context compression.
 
 ## Key Features
 
@@ -25,14 +25,14 @@ Rubato is a natural language-driven automated test execution framework. Users si
 - **ReAct Pattern** - Universal Reason → Act → Observe loop
 - **Multi-Agent Collaboration** - Supports main agent calling sub-agents with independent system prompts and contexts
 - **Dynamic Skill Loading** - Loads metadata at startup, full content on-demand during conversations
-- **MCP Tool Integration** - Supports Playwright MCP for browser automation
+- **Playwright CLI Integration** - Supports Playwright CLI for browser automation with high token efficiency
 - **Context Compression** - Automatically manages conversation history to avoid token overflow
-- **Browser Persistence** - Browser stays open between tasks, supporting state reuse and auto-reconnection
+- **Browser Persistence** - Browser runs as independent process, supporting state reuse and cross-session persistence
 
 ## Requirements
 
 - **Python**: 3.12+
-- **Node.js**: 18+ (for running Playwright MCP)
+- **Node.js**: 18+ (for running Playwright CLI)
 - **OS**: Windows / macOS / Linux
 
 ## Quick Start
@@ -43,11 +43,11 @@ Rubato is a natural language-driven automated test execution framework. Users si
 pip install -r requirements.txt
 ```
 
-### 2. Install Playwright MCP
+### 2. Install Playwright CLI
 
 ```bash
-npm install -g @playwright/mcp
-npx playwright install chromium
+npm install -g @playwright/cli@latest
+playwright-cli --help
 ```
 
 ### 3. Configure API Key
@@ -85,8 +85,7 @@ You'll see the following interface when successfully started:
 ╔══════════════════════════════════════════════════════════╗
 ║                       Rubato                             ║
 ╠══════════════════════════════════════════════════════════╣
-║ Status: Model: gpt-4 | MCP: Connected
-║ Loaded Skills: test-execution
+║ Status: Model: gpt-4 | Skills: playwright-cli, test-execution
 ╚══════════════════════════════════════════════════════════╝
 ```
 
@@ -98,7 +97,7 @@ You'll see the following interface when successfully started:
 
 The agent will automatically:
 1. Navigate to Baidu homepage
-2. Call sub-agent to analyze page snapshot
+2. Get page snapshot and analyze elements
 3. Identify search box and search button
 4. Type "Python" and search
 5. Take screenshot and return results
@@ -112,17 +111,17 @@ The agent will automatically:
 │                 Console Interaction Layer                │
 │              console.py / commands.py                    │
 ├─────────────────────────────────────────────────────────┤
-│                    Core Engine Layer                     │
+│                     Core Engine Layer                    │
 │            agent.py / sub_agents.py                      │
 ├─────────────────────────────────────────────────────────┤
 │                       Tool Layer                         │
-│     MCP Client / Tool Registry / Skill Loader            │
+│     ShellTool / Tool Registry / Skill Loader             │
 ├─────────────────────────────────────────────────────────┤
 │                     Support Layer                        │
 │      Context Manager / Config Loader / Logger            │
 ├─────────────────────────────────────────────────────────┤
 │                  Configuration Layer                     │
-│   model_config / mcp_config / prompt_config / skills     │
+│   model_config / prompt_config / skills                  │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -134,9 +133,9 @@ The agent will automatically:
 4. **Multi-Agent Collaboration**: Supports main agent calling sub-agents
 5. **Configuration-Driven**: All configurations exist as files for easy management
 6. **Dynamic Skill Loading**: Loads metadata at startup, full content on-demand
-7. **Tool Integration**: Supports MCP tool calling, sub-agent tools, and Skill tool extensions
+7. **Tool Integration**: Supports ShellTool for CLI commands, sub-agent tools, and Skill tool extensions
 8. **Context Compression**: Automatically manages conversation history to avoid token overflow
-9. **Browser Persistence**: Browser stays open between tasks, supporting state reuse
+9. **Browser Persistence**: Browser runs as independent process, supporting state reuse
 
 ## Project Structure
 
@@ -147,7 +146,6 @@ rubato/
 │   ├── core/              # Core modules
 │   │   ├── agent.py       # Main agent
 │   │   └── sub_agents.py  # Sub-agent mechanism
-│   ├── mcp/               # MCP integration
 │   ├── skills/            # Skill system
 │   ├── context/           # Context management
 │   ├── config/            # Configuration management
@@ -155,6 +153,7 @@ rubato/
 ├── config/                # Configuration files
 ├── prompts/               # Prompts
 ├── skills/                # Skill files
+│   └── playwright-cli/    # Playwright CLI Skill
 ├── sub_agents/            # Sub-agent configurations
 ├── logs/                  # Log directory
 └── tests/                 # Test files
@@ -173,9 +172,6 @@ rubato/
 | `/skill show <name>` | Show Skill details |
 | `/tool list` | List all available tools |
 | `/prompt show` | Display current system prompt |
-| `/browser status` | Check browser status |
-| `/browser close` | Close browser |
-| `/browser reopen` | Reopen browser |
 
 ## Extensibility
 
@@ -191,6 +187,8 @@ version: 1.0
 triggers:
   - trigger-word-1
   - trigger-word-2
+tools:
+  - ShellTool
 ---
 
 # My Skill
@@ -223,17 +221,17 @@ execution:
 - Python 3.12
 - LangChain 0.3.25
 - LangGraph 0.4.5
-- langchain-mcp-adapters
-- Playwright MCP
+- Playwright CLI
 - Pydantic
 
 ## Troubleshooting
 
-### MCP Connection Failed
+### Playwright CLI Not Installed
 
-1. Ensure Node.js 18+ is installed
-2. Run `npx -y @playwright/mcp` to test
-3. Check network connection and firewall settings
+```bash
+npm install -g @playwright/cli@latest
+playwright-cli --help
+```
 
 ### Invalid API Key
 
@@ -250,6 +248,8 @@ npx playwright install chromium
 
 - [Quick Start Guide](QUICK_START.md) (Chinese)
 - [Architecture Design Document](dev_docs/design.md) (Chinese)
+- [Playwright CLI Migration Design](dev_docs/playwright-cli-migration-design.md) (Chinese)
+- [Playwright MCP Setup Guide (Optional)](dev_docs/playwright-mcp-setup.md) (Chinese)
 
 ## License
 

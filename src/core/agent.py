@@ -1,6 +1,7 @@
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+from langchain_community.tools import ShellTool
 from typing import List, Optional
 import time
 
@@ -124,7 +125,7 @@ class RubatoAgent:
         
         init_sub_agent_manager(self.llm, "sub_agents")
         
-        self.tools = get_all_tools() + [spawn_agent]
+        self.tools = get_all_tools() + [spawn_agent, ShellTool()]
         
         self.agent = self._create_agent(self.system_prompt)
         
