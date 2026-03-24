@@ -204,7 +204,10 @@ class TestCaseManager {
     
     clearMindmap() {
         if (this.mindmapEditor) {
-            this.mindmapEditor.destroy();
+            try {
+                this.mindmapEditor.destroy();
+            } catch (e) {
+            }
             this.mindmapEditor = null;
         }
         if (this.markmap) {

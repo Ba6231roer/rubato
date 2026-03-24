@@ -97,16 +97,54 @@ class MindmapEditor {
             
             if (isDoubleClick && nodeData) {
                 console.log('[MindmapEditor] Double click simulated on node:', nodeData.content?.substring(0, 50));
-                console.log('[MindmapEditor] Node state:', JSON.stringify(nodeData?.state, null, 2));
                 this.startEditing(nodeData);
             } else if (nodeData) {
-                this.selectNode(nodeData);
+                const indexPath = this.getIndexPath(nodeData);
+                this.selectNode(nodeData, indexPath);
                 this.svg.focus();
-                console.log('[MindmapEditor] Node selected:', nodeData.content?.substring(0, 50), 'Path:', nodeData.state?.path);
+                console.log('[MindmapEditor] Node selected:', nodeData.content?.substring(0, 50), 'IndexPath:', indexPath);
             }
         } else {
             this.deselectNode();
         }
+    }
+    
+    getIndexPath(node) {
+        if (!node || !this.treeData) return null;
+        
+        this.resyncTreeData();
+        
+        const path = node.state?.path;
+        if (!path) return null;
+        
+        const parts = path.split('.').map(Number);
+        if (parts.length < 1) return null;
+        
+        let current = this.treeData;
+        const indexPath = [];
+        
+        for (let i = 1; i < parts.length; i++) {
+            if (!current.children) return null;
+            
+            let foundIndex = -1;
+            for (let j = 0; j < current.children.length; j++) {
+                const childId = current.children[j].state?.id;
+                if (childId === parts[i]) {
+                    foundIndex = j;
+                    break;
+                }
+            }
+            
+            if (foundIndex === -1) {
+                console.warn('[MindmapEditor] Cannot find child with id:', parts[i]);
+                return null;
+            }
+            
+            indexPath.push(foundIndex);
+            current = current.children[foundIndex];
+        }
+        
+        return indexPath.length > 0 ? [0, ...indexPath] : [0];
     }
 
     handleKeyDown(e) {
@@ -196,9 +234,9 @@ class MindmapEditor {
         return nodeData;
     }
 
-    selectNode(node) {
+    selectNode(node, indexPath = null) {
         this.selectedNode = node;
-        this.selectedNodePath = node.state?.path || null;
+        this.selectedNodePath = indexPath || node.state?.path || null;
         
         if (this.markmap) {
             this.markmap.setHighlight(node);
@@ -476,18 +514,76 @@ class MindmapEditor {
             return;
         }
         
-        const parentInfo = this.findParent(this.treeData, this.selectedNode);
-        if (!parentInfo) {
-            console.warn('[MindmapEditor] Parent not found');
+        if (this.isProcessing) {
+            console.log('[MindmapEditor] Processing in progress, skipping');
             return;
         }
         
-        console.log('[MindmapEditor] Deleting node:', this.selectedNode.content);
-        const deleted = this.converter.deleteNode(this.selectedNode, parentInfo.parent);
-        if (deleted) {
-            this.deselectNode();
-            this.notifyTreeChange();
+        const indexPath = this.selectedNodePath;
+        if (!indexPath || !Array.isArray(indexPath)) {
+            console.warn('[MindmapEditor] No indexPath found for selected node');
+            return;
         }
+        
+        if (indexPath.length < 2) {
+            console.warn('[MindmapEditor] Cannot delete root node');
+            return;
+        }
+        
+        this.isProcessing = true;
+        console.log('[MindmapEditor] Deleting node:', this.selectedNode.content?.substring(0, 30), 'IndexPath:', indexPath);
+        
+        const result = this.deleteNodeByIndexPath(this.treeData, indexPath);
+        if (result) {
+            console.log('[MindmapEditor] Node deleted successfully');
+            
+            const deletedNode = this.selectedNode;
+            this.selectedNode = null;
+            this.selectedNodePath = null;
+            
+            const markdown = this.getMarkdown();
+            
+            if (this.onTreeChange) {
+                this.onTreeChange(markdown);
+            }
+            
+            setTimeout(() => {
+                this.isProcessing = false;
+            }, 100);
+        } else {
+            console.warn('[MindmapEditor] Failed to delete node');
+            this.isProcessing = false;
+        }
+    }
+    
+    deleteNodeByIndexPath(tree, indexPath) {
+        if (!tree || !indexPath || indexPath.length < 2) {
+            console.log('[MindmapEditor] deleteNodeByIndexPath: invalid params');
+            return false;
+        }
+        
+        let current = tree;
+        
+        for (let i = 1; i < indexPath.length - 1; i++) {
+            const idx = indexPath[i];
+            if (!current.children || idx < 0 || idx >= current.children.length) {
+                console.log('[MindmapEditor] deleteNodeByIndexPath: invalid index', idx, 'at level', i);
+                return false;
+            }
+            current = current.children[idx];
+        }
+        
+        const lastIndex = indexPath[indexPath.length - 1];
+        console.log('[MindmapEditor] deleteNodeByIndexPath: lastIndex:', lastIndex, 'children count:', current.children?.length);
+        
+        if (!current.children || lastIndex < 0 || lastIndex >= current.children.length) {
+            console.log('[MindmapEditor] deleteNodeByIndexPath: cannot delete - invalid index');
+            return false;
+        }
+        
+        current.children.splice(lastIndex, 1);
+        
+        return true;
     }
 
     findParent(tree, target, parent = null) {

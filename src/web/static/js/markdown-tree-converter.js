@@ -31,18 +31,22 @@ class MarkdownTreeConverter {
         
         if (tree.children && tree.children.length > 0) {
             for (const child of tree.children) {
-                markdown += this.buildNode(child, 2);
+                markdown += this.buildNode(child);
             }
         }
         
         return markdown;
     }
 
-    buildNode(node, depth) {
+    buildNode(node) {
         let markdown = '';
-        const prefix = '#'.repeat(depth);
+        const content = node.content || '';
         
-        markdown += `\n${prefix} ${this.escapeContent(node.content)}\n`;
+        if (content.startsWith('#')) {
+            markdown += `${content}\n`;
+        } else {
+            markdown += `\n## ${this.escapeContent(content)}\n`;
+        }
         
         if (node.children && node.children.length > 0) {
             for (const child of node.children) {
@@ -53,15 +57,15 @@ class MarkdownTreeConverter {
         return markdown;
     }
 
-    buildListItem(node, indent) {
+    buildListItem(node, depth) {
         let markdown = '';
-        const spaces = '  '.repeat(indent);
+        const spaces = '  '.repeat(depth);
         
         markdown += `${spaces}- ${this.escapeContent(node.content)}\n`;
         
         if (node.children && node.children.length > 0) {
             for (const child of node.children) {
-                markdown += this.buildListItem(child, indent + 1);
+                markdown += this.buildListItem(child, depth + 1);
             }
         }
         
@@ -175,9 +179,9 @@ class MarkdownTreeConverter {
             if (current.children) {
                 for (const child of current.children) {
                     const result = findDepth(child, target, depth + 1);
-                    if (result !== -1) return result;
-                }
+                if (result !== -1) return result;
             }
+        }
             return -1;
         };
         
