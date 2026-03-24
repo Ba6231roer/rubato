@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rubato Console</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <h1 class="logo">Rubato Console</h1>
+            <div class="status-bar" id="statusBar">
+                <span class="status-item" id="modelStatus">模型: --</span>
+                <span class="status-item" id="mcpStatus">MCP: --</span>
+                <span class="status-item" id="browserStatus">浏览器: --</span>
+            </div>
+        </header>
+        
+        <div class="main-content">
+            <nav class="sidebar">
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">配置管理</h3>
+                    <ul class="nav-list" id="configNav">
+                        <li class="nav-item" data-config="model">
+                            <span class="nav-icon">📋</span>
+                            <span class="nav-text">模型配置</span>
+                        </li>
+                        <li class="nav-item" data-config="mcp">
+                            <span class="nav-icon">🔧</span>
+                            <span class="nav-text">MCP配置</span>
+                        </li>
+                        <li class="nav-item" data-config="prompt">
+                            <span class="nav-icon">💬</span>
+                            <span class="nav-text">系统提示词</span>
+                        </li>
+                        <li class="nav-item" data-config="skills">
+                            <span class="nav-icon">⚡</span>
+                            <span class="nav-text">Skill配置</span>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="sidebar-divider"></div>
+                
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">测试管理</h3>
+                    <ul class="nav-list">
+                        <li class="nav-item" data-view="sysconfig">
+                            <span class="nav-icon">⚙️</span>
+                            <span class="nav-text">系统/应用配置</span>
+                        </li>
+                        <li class="nav-item" data-view="testcases">
+                            <span class="nav-icon">📝</span>
+                            <span class="nav-text">测试案例管理</span>
+                        </li>
+                        <li class="nav-item" data-view="scenarios">
+                            <span class="nav-icon">🎬</span>
+                            <span class="nav-text">场景管理</span>
+                        </li>
+                        <li class="nav-item" data-view="execsets">
+                            <span class="nav-icon">📊</span>
+                            <span class="nav-text">执行集管理</span>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="sidebar-divider"></div>
+                
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">任务执行</h3>
+                    <ul class="nav-list">
+                        <li class="nav-item active" data-view="chat">
+                            <span class="nav-icon">💭</span>
+                            <span class="nav-text">任务输入</span>
+                        </li>
+                    </ul>
+                </div>
+                
+                <div class="sidebar-divider"></div>
+                
+                <div class="sidebar-section">
+                    <h3 class="sidebar-title">已加载Skills</h3>
+                    <ul class="nav-list" id="skillsList"></ul>
+                </div>
+            </nav>
+            
+            <main class="content-area">
+                <div id="configView" class="view hidden">
+                    <div class="config-header">
+                        <h2 id="configTitle">配置编辑</h2>
+                        <div class="config-actions">
+                            <button class="btn btn-primary" id="saveConfigBtn">保存</button>
+                            <button class="btn btn-secondary" id="reloadConfigBtn">重载</button>
+                        </div>
+                    </div>
+                    <div class="editor-container">
+                        <textarea id="configEditor" class="yaml-editor" spellcheck="false"></textarea>
+                    </div>
+                    <div class="config-message" id="configMessage"></div>
+                </div>
+                
+                <div id="sysconfigView" class="view hidden">
+                    <div class="placeholder-view">
+                        <div class="placeholder-icon">⚙️</div>
+                        <h2>系统/应用配置</h2>
+                        <p>此功能正在开发中，敬请期待...</p>
+                    </div>
+                </div>
+                
+                <div id="testcasesView" class="view hidden">
+                    <div class="placeholder-view">
+                        <div class="placeholder-icon">📝</div>
+                        <h2>测试案例管理</h2>
+                        <p>此功能正在开发中，敬请期待...</p>
+                    </div>
+                </div>
+                
+                <div id="scenariosView" class="view hidden">
+                    <div class="placeholder-view">
+                        <div class="placeholder-icon">🎬</div>
+                        <h2>场景管理</h2>
+                        <p>此功能正在开发中，敬请期待...</p>
+                    </div>
+                </div>
+                
+                <div id="execsetsView" class="view hidden">
+                    <div class="placeholder-view">
+                        <div class="placeholder-icon">📊</div>
+                        <h2>执行集管理</h2>
+                        <p>此功能正在开发中，敬请期待...</p>
+                    </div>
+                </div>
+                
+                <div id="chatView" class="view">
+                    <div class="chat-container">
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="welcome-message">
+                                <h2>欢迎使用 Rubato Console</h2>
+                                <p>在下方输入您的任务，AI助手将自动执行浏览器自动化测试。</p>
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <textarea 
+                                id="chatInput" 
+                                class="chat-input" 
+                                placeholder="输入任务描述..."
+                                rows="3"
+                            ></textarea>
+                            <button class="btn btn-primary send-btn" id="sendBtn">发送</button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+    
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/editor.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

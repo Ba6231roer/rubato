@@ -65,3 +65,4 @@ venv/
 dev_docs/
 .playwright-cli/
 skills/playwright-cli/
+config/model_config_local.yaml

@@ -291,6 +291,76 @@ class RubatoAgent:
             self.logger.log_error("agent_invoke", e)
             raise
     
+    async def run_stream(self, user_input: str):
+        """运行Agent，流式返回响应内容（用于WebSocket）"""
+        self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
+        
+        if self.mcp_manager and self.mcp_manager.is_connected:
+            browser_ok = await self.mcp_manager.ensure_browser()
+            if not browser_ok:
+                yield "浏览器初始化失败，请检查 MCP 连接"
+                return
+        
+        skill_name = self.skill_loader.find_matching_skill(user_input)
+        
+        if skill_name and not self.context_manager.is_skill_loaded(skill_name):
+            self.logger.log_agent_action("loading_skill", {"skill": skill_name})
+            enhanced_prompt = await self._inject_skill(skill_name)
+            self._current_system_prompt = enhanced_prompt
+            self.agent = self._create_agent(enhanced_prompt)
+            self.context_manager.mark_skill_loaded(skill_name)
+        
+        self.context_manager.add_user_message(user_input)
+        messages = self.context_manager.get_messages()
+        
+        self.logger.log_request(messages, self.config.model.model.name)
+        
+        start_time = time.time()
+        step_count = 0
+        
+        try:
+            final_content = ""
+            
+            async for event in self.agent.astream(
+                {"messages": messages},
+                stream_mode="updates"
+            ):
+                step_count += 1
+                
+                for node_name, node_output in event.items():
+                    if "messages" in node_output:
+                        for msg in node_output["messages"]:
+                            if isinstance(msg, AIMessage):
+                                content_str = _content_to_str(msg.content)
+                                self.context_manager.add_ai_message(content_str)
+                                self.logger.log_response(msg, self.config.model.model.name)
+                                
+                                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                                    for tc in msg.tool_calls:
+                                        self.logger.log_tool_call(tc["name"], tc["args"])
+                                
+                                if content_str:
+                                    final_content = content_str
+                                    yield content_str
+                                    
+                            elif isinstance(msg, ToolMessage):
+                                content_str = _content_to_str(msg.content)
+                                self.context_manager.add_tool_message(content_str, msg.tool_call_id)
+                                self.logger.log_tool_result("tool_message", content_str)
+            
+            elapsed = time.time() - start_time
+            self.logger.log_agent_action("stream_complete", {
+                "elapsed_seconds": round(elapsed, 2),
+                "total_steps": step_count
+            })
+            
+            if not final_content:
+                yield "任务已完成"
+            
+        except Exception as e:
+            self.logger.log_error("agent_invoke", e)
+            yield f"执行错误: {str(e)}"
+    
     async def _inject_skill(self, skill_name: str) -> str:
         """将Skill内容注入到提示词中"""
         skill_content = await self.skill_loader.load_full_skill(skill_name)
