@@ -128,17 +128,10 @@ class TestCaseManager {
     updateMindmap() {
         const content = this.elements.editor.value;
         if (!content.trim()) {
+            this.clearMindmap();
             this.elements.mindmap.innerHTML = '<div class="mindmap-placeholder">输入Markdown内容查看思维导图</div>';
             return;
         }
-        
-        this.elements.mindmap.innerHTML = '';
-        
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        svg.setAttribute('class', 'markmap');
-        svg.style.width = '100%';
-        svg.style.height = '100%';
-        this.elements.mindmap.appendChild(svg);
         
         try {
             const { Transformer, Markmap } = window.markmap;
@@ -151,6 +144,12 @@ class TestCaseManager {
                     this.markmap.setData(root);
                     this.markmap.fit();
                 } else {
+                    this.clearMindmap();
+                    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                    svg.setAttribute('class', 'markmap');
+                    svg.style.width = '100%';
+                    svg.style.height = '100%';
+                    this.elements.mindmap.appendChild(svg);
                     this.markmap = Markmap.create(svg, null, root);
                 }
             } else {
@@ -158,12 +157,26 @@ class TestCaseManager {
                     markmap: !!window.markmap,
                     keys: window.markmap ? Object.keys(window.markmap) : []
                 });
+                this.clearMindmap();
                 this.elements.mindmap.innerHTML = '<div class="mindmap-placeholder">思维导图库加载失败，请刷新页面</div>';
             }
         } catch (error) {
             console.error('Markmap render error:', error);
+            this.clearMindmap();
             this.elements.mindmap.innerHTML = `<div class="mindmap-placeholder">渲染失败: ${error.message}</div>`;
         }
+    }
+    
+    clearMindmap() {
+        if (this.markmap) {
+            try {
+                this.markmap.destroy();
+            } catch (e) {
+                // ignore destroy errors
+            }
+            this.markmap = null;
+        }
+        this.elements.mindmap.innerHTML = '';
     }
     
     initSaveButton() {

@@ -665,7 +665,7 @@ body {
 .testcases-mindmap {
     flex: 1;
     overflow: auto;
-    background-color: var(--content-bg);
+    background-color: #f5f0fa;
 }
 
 .mindmap-placeholder {
@@ -673,13 +673,17 @@ body {
     justify-content: center;
     align-items: center;
     height: 100%;
-    color: var(--text-muted);
+    color: #4a5568;
     font-size: 0.875rem;
 }
 
 .testcases-mindmap svg {
     width: 100%;
     height: 100%;
+}
+
+.testcases-mindmap svg markmap-svg {
+    background-color: #f5f0fa;
 }
 
 .tree-empty, .tree-error {
