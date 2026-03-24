@@ -28,6 +28,9 @@ Rubato is a natural language-driven automated test execution framework. Users si
 - **Playwright CLI Integration** - Supports Playwright CLI for browser automation with high token efficiency
 - **Context Compression** - Automatically manages conversation history to avoid token overflow
 - **Browser Persistence** - Browser runs as independent process, supporting state reuse and cross-session persistence
+- **Dual Mode Operation** - Supports both CLI command-line and Web UI interaction modes
+- **HTTP Service Layer** - Provides RESTful API and WebSocket interfaces for configuration management and real-time communication
+- **Lightweight Frontend** - Pure HTML/CSS/JS implementation, zero build dependencies, easy deployment
 
 ## Requirements
 
@@ -75,12 +78,25 @@ model:
 
 ### 4. Run
 
+**CLI Mode (Default)**
+
 ```bash
 python -m src.main
 ```
 
+**Web Mode**
+
+```bash
+# Default port 8000
+python -m src.main --web
+
+# Custom port
+python -m src.main --web --port 8080
+```
+
 You'll see the following interface when successfully started:
 
+**CLI Mode**
 ```
 ╔══════════════════════════════════════════════════════════╗
 ║                       Rubato                             ║
@@ -88,6 +104,14 @@ You'll see the following interface when successfully started:
 ║ Status: Model: gpt-4 | Skills: playwright-cli, test-execution
 ╚══════════════════════════════════════════════════════════╝
 ```
+
+**Web Mode**
+```
+HTTP Server started: http://127.0.0.1:8000
+Press Ctrl+C to stop
+```
+
+Visit `http://127.0.0.1:8000` in your browser to use the Web Console.
 
 ### 5. Quick Test Example
 
@@ -108,6 +132,12 @@ The agent will automatically:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
+│                 Web Interaction Layer                    │
+│              Browser / WebSocket Client                  │
+├─────────────────────────────────────────────────────────┤
+│                 HTTP Service Layer                       │
+│         FastAPI / WebSocket / Config Management API      │
+├─────────────────────────────────────────────────────────┤
 │                 Console Interaction Layer                │
 │              console.py / commands.py                    │
 ├─────────────────────────────────────────────────────────┤
@@ -136,16 +166,26 @@ The agent will automatically:
 7. **Tool Integration**: Supports ShellTool for CLI commands, sub-agent tools, and Skill tool extensions
 8. **Context Compression**: Automatically manages conversation history to avoid token overflow
 9. **Browser Persistence**: Browser runs as independent process, supporting state reuse
+10. **Dual Mode Operation**: Supports both CLI command-line and Web UI interaction modes
+11. **HTTP Service Layer**: Provides RESTful API and WebSocket interfaces
+12. **Lightweight Frontend**: Pure HTML/CSS/JS implementation, zero build dependencies
 
 ## Project Structure
 
 ```
 rubato/
 ├── src/                    # Source code
-│   ├── main.py            # Entry point
+│   ├── main.py            # Entry point (supports CLI/Web modes)
 │   ├── core/              # Core modules
 │   │   ├── agent.py       # Main agent
 │   │   └── sub_agents.py  # Sub-agent mechanism
+│   ├── api/               # HTTP service layer
+│   │   ├── app.py         # FastAPI application
+│   │   ├── routes/        # API routes
+│   │   └── websocket.py   # WebSocket handler
+│   ├── web/               # Web UI
+│   │   ├── templates/     # HTML templates
+│   │   └── static/        # Static assets
 │   ├── skills/            # Skill system
 │   ├── context/           # Context management
 │   ├── config/            # Configuration management
@@ -221,6 +261,8 @@ execution:
 - Python 3.12
 - LangChain 0.3.25
 - LangGraph 0.4.5
+- FastAPI 0.109+
+- Uvicorn 0.27+
 - Playwright CLI
 - Pydantic
 
