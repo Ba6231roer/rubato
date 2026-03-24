@@ -8,7 +8,7 @@ class App {
         this.elements = {
             configNav: document.getElementById('configNav'),
             configView: document.getElementById('configView'),
-            sysconfigView: document.getElementById('sysconfigView'),
+            knowledgeView: document.getElementById('knowledgeView'),
             testcasesView: document.getElementById('testcasesView'),
             scenariosView: document.getElementById('scenariosView'),
             execsetsView: document.getElementById('execsetsView'),
@@ -20,7 +20,9 @@ class App {
             modelStatus: document.getElementById('modelStatus'),
             mcpStatus: document.getElementById('mcpStatus'),
             browserStatus: document.getElementById('browserStatus'),
-            skillsList: document.getElementById('skillsList')
+            skillsList: document.getElementById('skillsList'),
+            sidebar: document.querySelector('.sidebar'),
+            sidebarToggle: document.getElementById('sidebarToggle')
         };
         
         this.init();
@@ -30,10 +32,25 @@ class App {
         this.initNavigation();
         this.initChat();
         this.initWebSocket();
+        this.initSidebarToggle();
         this.loadStatus();
         this.loadSkills();
         
         setInterval(() => this.loadStatus(), 30000);
+    }
+    
+    initSidebarToggle() {
+        if (this.elements.sidebarToggle) {
+            this.elements.sidebarToggle.addEventListener('click', () => {
+                this.elements.sidebar.classList.toggle('collapsed');
+                const icon = this.elements.sidebarToggle.querySelector('.toggle-icon');
+                if (this.elements.sidebar.classList.contains('collapsed')) {
+                    this.elements.sidebarToggle.title = '展开侧边栏';
+                } else {
+                    this.elements.sidebarToggle.title = '折叠侧边栏';
+                }
+            });
+        }
     }
     
     initNavigation() {
@@ -56,7 +73,7 @@ class App {
     
     hideAllViews() {
         this.elements.configView.classList.add('hidden');
-        this.elements.sysconfigView.classList.add('hidden');
+        this.elements.knowledgeView.classList.add('hidden');
         this.elements.testcasesView.classList.add('hidden');
         this.elements.scenariosView.classList.add('hidden');
         this.elements.execsetsView.classList.add('hidden');
@@ -75,8 +92,8 @@ class App {
         this.hideAllViews();
         
         switch(viewName) {
-            case 'sysconfig':
-                this.elements.sysconfigView.classList.remove('hidden');
+            case 'knowledge':
+                this.elements.knowledgeView.classList.remove('hidden');
                 break;
             case 'testcases':
                 this.elements.testcasesView.classList.remove('hidden');

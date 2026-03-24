@@ -66,3 +66,5 @@ dev_docs/
 .playwright-cli/
 skills/playwright-cli/
 config/model_config_local.yaml
+test_case_path/
+knowledge_path/

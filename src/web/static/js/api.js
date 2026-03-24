@@ -38,6 +38,54 @@ const API = {
     async getTools() {
         const response = await fetch(`${this.baseUrl}/api/tools`);
         return response.json();
+    },
+    
+    async getTestCaseTree() {
+        const response = await fetch(`${this.baseUrl}/api/testcases/tree`);
+        return response.json();
+    },
+    
+    async getTestCaseFile(path) {
+        const response = await fetch(`${this.baseUrl}/api/testcases/file?path=${encodeURIComponent(path)}`);
+        if (!response.ok) {
+            throw new Error(`获取文件失败: ${response.statusText}`);
+        }
+        return response.json();
+    },
+    
+    async updateTestCaseFile(path, content) {
+        const response = await fetch(`${this.baseUrl}/api/testcases/file`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ path, content })
+        });
+        return response.json();
+    },
+    
+    async getKnowledgeTree() {
+        const response = await fetch(`${this.baseUrl}/api/knowledge/tree`);
+        return response.json();
+    },
+    
+    async getKnowledgeFile(path) {
+        const response = await fetch(`${this.baseUrl}/api/knowledge/file?path=${encodeURIComponent(path)}`);
+        if (!response.ok) {
+            throw new Error(`获取文件失败: ${response.statusText}`);
+        }
+        return response.json();
+    },
+    
+    async updateKnowledgeFile(path, content) {
+        const response = await fetch(`${this.baseUrl}/api/knowledge/file`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ path, content })
+        });
+        return response.json();
     }
 };
 

@@ -45,3 +45,28 @@ class ToolInfo(BaseModel):
 class WSMessage(BaseModel):
     type: str
     content: str
+
+
+class TestCaseTreeNode(BaseModel):
+    name: str
+    type: str
+    path: str
+    children: Optional[List['TestCaseTreeNode']] = None
+
+
+TestCaseTreeNode.model_rebuild()
+
+
+class TestCaseFileContent(BaseModel):
+    path: str
+    content: str
+
+
+class TestCaseFileUpdateRequest(BaseModel):
+    path: str
+    content: str
+
+
+class TestCaseFileUpdateResponse(BaseModel):
+    success: bool
+    message: str

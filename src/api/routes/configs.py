@@ -29,6 +29,10 @@ CONFIG_FILES = {
     "skills": {
         "file": "skills_config.yaml",
         "description": "Skill配置 - Skill目录和加载设置"
+    },
+    "test": {
+        "file": "test_config.yaml",
+        "description": "测试配置 - 系统标识、应用标识、测试案例路径"
     }
 }
 

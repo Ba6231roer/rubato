@@ -44,7 +44,8 @@ class ConfigEditor {
             'model': '模型配置',
             'mcp': 'MCP配置',
             'prompt': '系统提示词配置',
-            'skills': 'Skill配置'
+            'skills': 'Skill配置',
+            'test': '测试配置'
         };
         return titles[name] || name;
     }
