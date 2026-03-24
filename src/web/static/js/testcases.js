@@ -3,7 +3,9 @@ class TestCaseManager {
         this.currentFile = null;
         this.tree = [];
         this.markmap = null;
+        this.mindmapEditor = null;
         this.updateTimeout = null;
+        this.syncSource = null;
         
         this.elements = {
             tree: document.getElementById('testcasesTree'),
@@ -27,6 +29,7 @@ class TestCaseManager {
         this.initSaveButton();
         this.initSidebarToggle();
         this.initResizeHandle();
+        this.initMindmapToolbar();
     }
     
     async loadTree() {
@@ -126,6 +129,10 @@ class TestCaseManager {
     }
     
     updateMindmap() {
+        if (this.syncSource === 'mindmap') {
+            return;
+        }
+        
         const content = this.elements.editor.value;
         if (!content.trim()) {
             this.clearMindmap();
@@ -151,6 +158,13 @@ class TestCaseManager {
                     svg.style.height = '100%';
                     this.elements.mindmap.appendChild(svg);
                     this.markmap = Markmap.create(svg, null, root);
+                    
+                    this.initMindmapEditor(svg);
+                }
+                
+                if (this.mindmapEditor && this.mindmapEditor.treeData) {
+                    const freshTree = this.mindmapEditor.converter.parse(content);
+                    this.mindmapEditor.treeData = freshTree;
                 }
             } else {
                 console.error('Markmap libraries not loaded:', {
@@ -167,16 +181,64 @@ class TestCaseManager {
         }
     }
     
+    initMindmapEditor(svg) {
+        if (!window.MindmapEditor) {
+            console.warn('MindmapEditor not loaded');
+            return;
+        }
+        
+        this.mindmapEditor = new MindmapEditor({
+            onTreeChange: (markdown) => {
+                console.log('[TestCaseManager] onTreeChange callback received');
+                this.syncSource = 'mindmap';
+                this.elements.editor.value = markdown;
+                this.syncSource = null;
+            },
+            onSelectionChange: (node) => {
+            }
+        });
+        
+        this.mindmapEditor.attach(svg, this.markmap);
+        console.log('[TestCaseManager] MindmapEditor attached, treeData:', this.mindmapEditor.treeData?.content);
+    }
+    
     clearMindmap() {
+        if (this.mindmapEditor) {
+            this.mindmapEditor.destroy();
+            this.mindmapEditor = null;
+        }
         if (this.markmap) {
             try {
                 this.markmap.destroy();
             } catch (e) {
-                // ignore destroy errors
             }
             this.markmap = null;
         }
         this.elements.mindmap.innerHTML = '';
+    }
+    
+    initMindmapToolbar() {
+        const toolbar = document.createElement('div');
+        toolbar.className = 'mindmap-toolbar';
+        toolbar.innerHTML = `
+            <button class="mindmap-toolbar-btn" id="expandAllBtn" title="全部展开">展开全部</button>
+            <button class="mindmap-toolbar-btn" id="collapseAllBtn" title="全部折叠">折叠全部</button>
+        `;
+        
+        this.elements.mindmapPanel.style.position = 'relative';
+        this.elements.mindmapPanel.insertBefore(toolbar, this.elements.mindmapPanel.firstChild);
+        
+        document.getElementById('expandAllBtn').addEventListener('click', () => {
+            if (this.mindmapEditor) {
+                this.mindmapEditor.expandAll();
+            }
+        });
+        
+        document.getElementById('collapseAllBtn').addEventListener('click', () => {
+            if (this.mindmapEditor) {
+                this.mindmapEditor.collapseAll();
+            }
+        });
     }
     
     initSaveButton() {
