@@ -49,7 +49,7 @@ def _estimate_tokens(messages: List) -> int:
 
 
 def _compress_messages(messages: List, max_tokens: int = 50000) -> List:
-    """压缩消息列表，保持在token限制内"""
+    """压缩消息列表，保持在token限制内，确保消息链完整性"""
     current_tokens = _estimate_tokens(messages)
     
     if current_tokens <= max_tokens:
@@ -79,7 +79,37 @@ def _compress_messages(messages: List, max_tokens: int = 50000) -> List:
     
     summary = HumanMessage(content=f"[历史摘要]\n" + "\n".join(summary_parts[-10:]))
     
-    return system_messages + [summary] + recent_messages
+    valid_recent = _ensure_message_chain_valid(recent_messages)
+    
+    return system_messages + [summary] + valid_recent
+
+
+def _ensure_message_chain_valid(messages: List) -> List:
+    """确保消息链有效：ToolMessage必须紧跟在带tool_calls的AIMessage之后"""
+    if not messages:
+        return messages
+    
+    valid_messages = []
+    pending_tool_call_ids = set()
+    
+    for msg in messages:
+        if isinstance(msg, AIMessage):
+            valid_messages.append(msg)
+            if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                for tc in msg.tool_calls:
+                    pending_tool_call_ids.add(tc.get('id'))
+        elif isinstance(msg, ToolMessage):
+            if msg.tool_call_id in pending_tool_call_ids:
+                valid_messages.append(msg)
+                pending_tool_call_ids.discard(msg.tool_call_id)
+            else:
+                content_str = _content_to_str(msg.content)
+                content = content_str[:200] + "..." if len(content_str) > 200 else content_str
+                valid_messages.append(HumanMessage(content=f"[工具结果摘要]: {content}"))
+        else:
+            valid_messages.append(msg)
+    
+    return valid_messages
 
 
 def _convert_messages_for_api(messages: List) -> List:
@@ -169,7 +199,8 @@ class RubatoAgent:
             "base_url": model_config.base_url,
             "temperature": model_config.temperature,
             "max_tokens": model_config.max_tokens,
-            "default_headers": {"Authorization": model_config.auth} if model_config.auth else None
+            "default_headers": {"Authorization": model_config.auth} if model_config.auth else None,
+            "callbacks": [self.logger.get_callback_handler()]
         }
         
         return ChatOpenAI(
@@ -263,14 +294,14 @@ class RubatoAgent:
                     if "messages" in node_output:
                         for msg in node_output["messages"]:
                             if isinstance(msg, AIMessage):
-                                content_str = _content_to_str(msg.content)
-                                self.context_manager.add_ai_message(content_str)
+                                self.context_manager.add_ai_message_full(msg)
                                 self.logger.log_response(msg, self.config.model.model.name)
                                 
                                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
                                     for tc in msg.tool_calls:
                                         self.logger.log_tool_call(tc["name"], tc["args"])
                                 
+                                content_str = _content_to_str(msg.content)
                                 if content_str:
                                     final_content = content_str
                                     
@@ -331,14 +362,14 @@ class RubatoAgent:
                     if "messages" in node_output:
                         for msg in node_output["messages"]:
                             if isinstance(msg, AIMessage):
-                                content_str = _content_to_str(msg.content)
-                                self.context_manager.add_ai_message(content_str)
+                                self.context_manager.add_ai_message_full(msg)
                                 self.logger.log_response(msg, self.config.model.model.name)
                                 
                                 if hasattr(msg, 'tool_calls') and msg.tool_calls:
                                     for tc in msg.tool_calls:
                                         self.logger.log_tool_call(tc["name"], tc["args"])
                                 
+                                content_str = _content_to_str(msg.content)
                                 if content_str:
                                     final_content = content_str
                                     yield content_str

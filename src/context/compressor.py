@@ -1,6 +1,6 @@
 import tiktoken
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
-from typing import List, Optional
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage, ToolMessage
+from typing import List, Optional, Set
 
 
 class ContextCompressor:
@@ -48,7 +48,7 @@ class ContextCompressor:
         return self.count_tokens(messages) > self.max_tokens
     
     def compress(self, messages: List[BaseMessage]) -> List[BaseMessage]:
-        """压缩对话历史"""
+        """压缩对话历史，确保消息链完整性"""
         if not self.needs_compression(messages):
             return messages
         
@@ -61,9 +61,38 @@ class ContextCompressor:
         recent_messages = non_system_messages[-self.keep_recent * 2:]
         middle_messages = non_system_messages[:-self.keep_recent * 2]
         
+        valid_recent = self._ensure_message_chain_valid(recent_messages)
+        
         summary = self._create_summary(middle_messages)
         
-        return system_messages + [summary] + recent_messages
+        return system_messages + [summary] + valid_recent
+    
+    def _ensure_message_chain_valid(self, messages: List[BaseMessage]) -> List[BaseMessage]:
+        """确保消息链有效：ToolMessage必须紧跟在带tool_calls的AIMessage之后"""
+        if not messages:
+            return messages
+        
+        valid_messages = []
+        pending_tool_call_ids: Set[str] = set()
+        
+        for msg in messages:
+            if isinstance(msg, AIMessage):
+                valid_messages.append(msg)
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        pending_tool_call_ids.add(tc.get('id'))
+            elif isinstance(msg, ToolMessage):
+                if msg.tool_call_id in pending_tool_call_ids:
+                    valid_messages.append(msg)
+                    pending_tool_call_ids.discard(msg.tool_call_id)
+                else:
+                    content_str = self._get_content_str(msg.content)
+                    content = content_str[:200] + "..." if len(content_str) > 200 else content_str
+                    valid_messages.append(HumanMessage(content=f"[工具结果摘要]: {content}"))
+            else:
+                valid_messages.append(msg)
+        
+        return valid_messages
     
     def _create_summary(self, messages: List[BaseMessage]) -> HumanMessage:
         """创建历史摘要"""

@@ -32,6 +32,10 @@ class ContextManager:
         """添加AI消息"""
         self.add_message(AIMessage(content=content))
     
+    def add_ai_message_full(self, message: AIMessage) -> None:
+        """添加完整的AI消息对象（保留tool_calls等属性）"""
+        self.add_message(message)
+    
     def add_tool_message(self, content: str, tool_call_id: str) -> None:
         """添加工具消息"""
         self.add_message(ToolMessage(content=content, tool_call_id=tool_call_id))

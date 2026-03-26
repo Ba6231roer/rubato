@@ -2,8 +2,57 @@ import logging
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, List, Dict
 import sys
+from langchain_core.callbacks import BaseCallbackHandler
+
+
+class LLMRequestCallbackHandler(BaseCallbackHandler):
+    """LangChain回调处理器，用于捕获LLM请求"""
+    
+    def __init__(self, logger: 'LLMLogger'):
+        self.logger = logger
+    
+    def on_llm_start(
+        self,
+        serialized: Dict[str, Any],
+        prompts: List[str],
+        **kwargs: Any
+    ) -> None:
+        """LLM开始调用时记录请求"""
+        invocation_params = kwargs.get("invocation_params", {})
+        messages = kwargs.get("messages", [])
+        
+        request_body = {
+            "model": invocation_params.get("model", "unknown"),
+            "temperature": invocation_params.get("temperature"),
+            "max_tokens": invocation_params.get("max_tokens"),
+            "messages": self._format_messages(messages) if messages else prompts,
+            "tools": invocation_params.get("tools"),
+            "tool_choice": invocation_params.get("tool_choice"),
+        }
+        
+        request_body = {k: v for k, v in request_body.items() if v is not None}
+        
+        self.logger.log_request_raw(request_body, request_body.get("model", "unknown"))
+    
+    def _format_messages(self, messages: List) -> List[Dict]:
+        """格式化消息列表"""
+        result = []
+        for msg in messages:
+            if hasattr(msg, "type"):
+                msg_dict = {
+                    "role": msg.type,
+                    "content": self.logger._truncate(self.logger._get_content(msg), 500)
+                }
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    msg_dict["tool_calls"] = msg.tool_calls
+                if hasattr(msg, "tool_call_id"):
+                    msg_dict["tool_call_id"] = msg.tool_call_id
+                result.append(msg_dict)
+            else:
+                result.append(str(msg)[:500])
+        return result
 
 
 class LLMLogger:
@@ -63,6 +112,10 @@ class LLMLogger:
             "extra": kwargs
         }
         self.llm_logger.info(f"REQUEST: {json.dumps(request_data, ensure_ascii=False, indent=2)}")
+    
+    def log_request_raw(self, request_body: dict, model: str):
+        """记录LLM原始请求报文"""
+        self.llm_logger.debug(f"REQUEST_RAW: {json.dumps(request_body, ensure_ascii=False, indent=2)}")
     
     def log_response(self, response: Any, model: str):
         """记录LLM响应"""
@@ -165,6 +218,10 @@ class LLMLogger:
         if len(text) > max_len:
             return text[:max_len] + "...[truncated]"
         return text
+    
+    def get_callback_handler(self) -> LLMRequestCallbackHandler:
+        """获取LangChain回调处理器"""
+        return LLMRequestCallbackHandler(self)
 
 
 _llm_logger: Optional[LLMLogger] = None
