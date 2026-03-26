@@ -121,8 +121,26 @@ class SkillsConfig(BaseModel):
     skill_loading: SkillLoadingConfig = SkillLoadingConfig()
 
 
+class AgentExecutionConfig(BaseModel):
+    recursion_limit: int = 100
+    sub_agent_recursion_limit: int = 50
+
+    @field_validator('recursion_limit', 'sub_agent_recursion_limit')
+    @classmethod
+    def validate_positive(cls, v):
+        if v <= 0:
+            raise ValueError('must be positive')
+        return v
+
+
+class AgentConfig(BaseModel):
+    max_context_tokens: int = 80000
+    execution: AgentExecutionConfig = AgentExecutionConfig()
+
+
 class AppConfig(BaseModel):
     model: FullModelConfig
     mcp: MCPConfig
     prompts: PromptConfig
     skills: SkillsConfig
+    agent: AgentConfig = AgentConfig()

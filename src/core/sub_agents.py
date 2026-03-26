@@ -12,9 +12,10 @@ from ..mcp.tools import get_all_tools, get_tools_by_names
 class SubAgentManager:
     """子Agent管理器"""
     
-    def __init__(self, llm, sub_agents_dir: str = "sub_agents"):
+    def __init__(self, llm, sub_agents_dir: str = "sub_agents", recursion_limit: int = 50):
         self.llm = llm
         self.sub_agents_dir = Path(sub_agents_dir)
+        self.recursion_limit = recursion_limit
         self.agent_configs: dict = {}
         self._load_agent_configs()
     
@@ -57,10 +58,10 @@ class SubAgentManager:
 _sub_agent_manager: Optional[SubAgentManager] = None
 
 
-def init_sub_agent_manager(llm, sub_agents_dir: str = "sub_agents") -> None:
+def init_sub_agent_manager(llm, sub_agents_dir: str = "sub_agents", recursion_limit: int = 50) -> None:
     """初始化子Agent管理器"""
     global _sub_agent_manager
-    _sub_agent_manager = SubAgentManager(llm, sub_agents_dir)
+    _sub_agent_manager = SubAgentManager(llm, sub_agents_dir, recursion_limit)
 
 
 def get_sub_agent_manager() -> Optional[SubAgentManager]:
@@ -122,7 +123,10 @@ async def spawn_agent(
     for attempt in range(max_retries + 1):
         try:
             result = await asyncio.wait_for(
-                sub_agent.ainvoke({"messages": [HumanMessage(content=task)]}),
+                sub_agent.ainvoke(
+                    {"messages": [HumanMessage(content=task)]},
+                    config={"recursion_limit": _sub_agent_manager.recursion_limit}
+                ),
                 timeout=timeout
             )
             return result["messages"][-1].content

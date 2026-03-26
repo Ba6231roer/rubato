@@ -134,8 +134,6 @@ def _convert_messages_for_api(messages: List) -> List:
 class RubatoAgent:
     """自然语言驱动的自动化测试执行 Agent"""
     
-    MAX_CONTEXT_TOKENS = 80000
-    
     def __init__(
         self, 
         config: AppConfig,
@@ -153,7 +151,10 @@ class RubatoAgent:
         self.system_prompt = self._load_system_prompt()
         self._current_system_prompt = self.system_prompt
         
-        init_sub_agent_manager(self.llm, "sub_agents")
+        self.max_context_tokens = config.agent.max_context_tokens
+        self.recursion_limit = config.agent.execution.recursion_limit
+        
+        init_sub_agent_manager(self.llm, "sub_agents", config.agent.execution.sub_agent_recursion_limit)
         
         self.tools = get_all_tools() + [spawn_agent, ShellTool()]
         
@@ -162,7 +163,8 @@ class RubatoAgent:
         self.logger.log_agent_action("agent_initialized", {
             "model": config.model.model.name,
             "tool_count": len(self.tools),
-            "max_context_tokens": self.MAX_CONTEXT_TOKENS
+            "max_context_tokens": self.max_context_tokens,
+            "recursion_limit": self.recursion_limit
         })
     
     def _create_agent(self, system_prompt: str):
@@ -170,7 +172,7 @@ class RubatoAgent:
         def pre_model_hook(state):
             messages = state.get("messages", [])
             
-            compressed = _compress_messages(messages, self.MAX_CONTEXT_TOKENS)
+            compressed = _compress_messages(messages, self.max_context_tokens)
             converted = _convert_messages_for_api(compressed)
             
             token_estimate = _estimate_tokens(compressed)
@@ -277,7 +279,8 @@ class RubatoAgent:
             
             async for event in self.agent.astream(
                 {"messages": messages},
-                stream_mode="updates"
+                stream_mode="updates",
+                config={"recursion_limit": self.recursion_limit}
             ):
                 step_count += 1
                 self.logger.log_agent_action("stream_event", {
@@ -354,7 +357,8 @@ class RubatoAgent:
             
             async for event in self.agent.astream(
                 {"messages": messages},
-                stream_mode="updates"
+                stream_mode="updates",
+                config={"recursion_limit": self.recursion_limit}
             ):
                 step_count += 1
                 
