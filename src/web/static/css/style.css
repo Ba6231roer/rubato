@@ -813,3 +813,272 @@ body {
     border-radius: 3px;
     margin: 0 2px;
 }
+
+:root {
+    --panel-header-height: 44px;
+    --panel-min-width: 200px;
+    --resize-handle-width: 6px;
+    --collapse-btn-size: 24px;
+}
+
+.panel-layout {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+}
+
+.panel {
+    display: flex;
+    flex-direction: column;
+    background-color: var(--sidebar-bg);
+    border-right: 1px solid var(--border-color);
+    overflow: hidden;
+    transition: width 0.3s ease;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.panel:last-child {
+    border-right: none;
+}
+
+.panel.collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    border-right: none;
+    overflow: hidden;
+}
+
+.panel.collapsed .panel-header,
+.panel.collapsed .panel-content {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background-color: var(--card-bg);
+    border-bottom: 1px solid var(--border-color);
+    min-height: var(--panel-header-height);
+    flex-shrink: 0;
+}
+
+.panel-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.panel-collapse-btn {
+    width: var(--collapse-btn-size);
+    height: var(--collapse-btn-size);
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.875rem;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.panel-collapse-btn:hover {
+    background-color: rgba(74, 144, 217, 0.1);
+    color: var(--text-color);
+}
+
+.panel-collapse-btn .toggle-icon {
+    transition: transform 0.3s ease;
+    font-style: normal;
+}
+
+.panel-action-btn {
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 8px;
+    transition: background-color 0.2s;
+}
+
+.panel-action-btn:hover {
+    background-color: var(--primary-hover);
+}
+
+.panel-action-btn:disabled {
+    background-color: var(--secondary-color);
+    cursor: not-allowed;
+}
+
+.panel-content {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.panel-expand-btn {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 48px;
+    background: var(--sidebar-bg);
+    border: 1px solid var(--border-color);
+    border-left: none;
+    border-radius: 0 4px 4px 0;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.75rem;
+    z-index: 10;
+    right: 0;
+}
+
+.panel-expand-btn-left {
+    border-left: 1px solid var(--border-color);
+    border-right: none;
+    border-radius: 4px 0 0 4px;
+    left: 0;
+    right: auto;
+}
+
+.panel-expand-btn:hover {
+    color: var(--text-color);
+    background: var(--card-bg);
+}
+
+.panel-resize-handle {
+    width: var(--resize-handle-width);
+    background: transparent;
+    cursor: col-resize;
+    flex-shrink: 0;
+    position: relative;
+}
+
+.panel-resize-handle:hover {
+    background: var(--primary-color);
+}
+
+.panel-resize-handle::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 2px;
+    height: 40px;
+    background: var(--border-color);
+    border-radius: 1px;
+}
+
+.panel-resize-handle:hover::after {
+    background: var(--text-color);
+}
+
+.directory-tree-wrapper {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.directory-tree {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.markdown-editor-wrapper {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.markdown-editor {
+    flex: 1;
+    width: 100%;
+    background-color: var(--content-bg);
+    color: var(--text-color);
+    border: none;
+    padding: 16px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: none;
+    outline: none;
+}
+
+.mindmap-panel-wrapper {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.mindmap-content {
+    flex: 1;
+    overflow: auto;
+    background-color: #f5f0fa;
+}
+
+.mindmap-content svg {
+    width: 100%;
+    height: 100%;
+}
+
+.chat-panel-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.chat-panel-wrapper .chat-messages {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+}
+
+.chat-panel-wrapper .chat-input-area {
+    display: flex;
+    gap: 8px;
+    padding: 12px;
+    border-top: 1px solid var(--border-color);
+    background-color: var(--card-bg);
+}
+
+.chat-panel-wrapper .chat-input {
+    flex: 1;
+    background-color: var(--content-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 10px;
+    font-size: 14px;
+    resize: none;
+    outline: none;
+    font-family: inherit;
+    min-height: 60px;
+}
+
+.chat-panel-wrapper .chat-input:focus {
+    border-color: var(--primary-color);
+}
+
+.chat-panel-wrapper .send-btn {
+    align-self: flex-end;
+    padding: 10px 20px;
+}

@@ -4,6 +4,8 @@ class App {
         this.wsClient = null;
         this.currentView = 'chat';
         this.isStreaming = false;
+        this.knowledgeManager = null;
+        this.testcaseManager = null;
         
         this.elements = {
             configNav: document.getElementById('configNav'),
@@ -93,10 +95,20 @@ class App {
         
         switch(viewName) {
             case 'knowledge':
+                this.collapseSidebar();
                 this.elements.knowledgeView.classList.remove('hidden');
+                if (!this.knowledgeManager) {
+                    this.knowledgeManager = new KnowledgeManager();
+                }
+                this.knowledgeManager.init();
                 break;
             case 'testcases':
+                this.collapseSidebar();
                 this.elements.testcasesView.classList.remove('hidden');
+                if (!this.testcaseManager) {
+                    this.testcaseManager = new TestCaseManager();
+                }
+                this.testcaseManager.init();
                 break;
             case 'scenarios':
                 this.elements.scenariosView.classList.remove('hidden');
@@ -109,6 +121,13 @@ class App {
                 this.elements.chatView.classList.remove('hidden');
                 this.elements.chatInput.focus();
                 break;
+        }
+    }
+    
+    collapseSidebar() {
+        if (this.elements.sidebar && !this.elements.sidebar.classList.contains('collapsed')) {
+            this.elements.sidebar.classList.add('collapsed');
+            this.elements.sidebarToggle.title = '展开侧边栏';
         }
     }
     
@@ -133,6 +152,16 @@ class App {
     }
     
     handleWSMessage(data) {
+        if (this.currentView === 'knowledge' && this.knowledgeManager) {
+            this.knowledgeManager.handleWSMessage(data);
+            return;
+        }
+        
+        if (this.currentView === 'testcases' && this.testcaseManager) {
+            this.testcaseManager.handleWSMessage(data);
+            return;
+        }
+        
         switch (data.type) {
             case 'connected':
                 console.log('WS connected:', data.content);

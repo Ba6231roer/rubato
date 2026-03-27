@@ -113,75 +113,9 @@
                     <div class="config-message" id="configMessage"></div>
                 </div>
                 
-                <div id="knowledgeView" class="view hidden">
-                    <div class="testcases-container">
-                        <div class="testcases-sidebar" id="knowledgeSidebar">
-                            <div class="testcases-sidebar-header">
-                                <h3>知识库目录</h3>
-                            </div>
-                            <div class="testcases-tree" id="knowledgeTree"></div>
-                            <button class="sidebar-collapse-toggle" id="knowledgeSidebarToggle" title="折叠目录">
-                                <span class="toggle-icon">«</span>
-                            </button>
-                        </div>
-                        <div class="testcases-content">
-                            <button class="sidebar-expand-btn" id="knowledgeSidebarExpand" title="展开目录">
-                                <span class="toggle-icon">»</span>
-                            </button>
-                            <div class="testcases-editor-panel" id="knowledgeEditorPanel">
-                                <div class="testcases-editor-header">
-                                    <h3>Markdown编辑</h3>
-                                    <button class="btn btn-primary btn-sm" id="saveKnowledgeBtn">保存</button>
-                                </div>
-                                <textarea class="testcases-editor" id="knowledgeEditor" placeholder="选择一个.md文件进行编辑..."></textarea>
-                            </div>
-                            <div class="resize-handle" id="knowledgeResizeHandle"></div>
-                            <div class="testcases-mindmap-panel" id="knowledgeMindmapPanel">
-                                <div class="testcases-mindmap-header">
-                                    <h3>思维导图</h3>
-                                </div>
-                                <div class="testcases-mindmap" id="knowledgeMindmap">
-                                    <div class="mindmap-placeholder">选择一个.md文件查看思维导图</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div id="knowledgeView" class="view hidden"></div>
                 
-                <div id="testcasesView" class="view hidden">
-                    <div class="testcases-container">
-                        <div class="testcases-sidebar" id="testcasesSidebar">
-                            <div class="testcases-sidebar-header">
-                                <h3>测试案例目录</h3>
-                            </div>
-                            <div class="testcases-tree" id="testcasesTree"></div>
-                            <button class="sidebar-collapse-toggle" id="testcasesSidebarToggle" title="折叠目录">
-                                <span class="toggle-icon">«</span>
-                            </button>
-                        </div>
-                        <div class="testcases-content">
-                            <button class="sidebar-expand-btn" id="testcasesSidebarExpand" title="展开目录">
-                                <span class="toggle-icon">»</span>
-                            </button>
-                            <div class="testcases-editor-panel" id="testcasesEditorPanel">
-                                <div class="testcases-editor-header">
-                                    <h3>Markdown编辑</h3>
-                                    <button class="btn btn-primary btn-sm" id="saveTestcaseBtn">保存</button>
-                                </div>
-                                <textarea class="testcases-editor" id="testcasesEditor" placeholder="选择一个.md文件进行编辑..."></textarea>
-                            </div>
-                            <div class="resize-handle" id="testcasesResizeHandle"></div>
-                            <div class="testcases-mindmap-panel" id="testcasesMindmapPanel">
-                                <div class="testcases-mindmap-header">
-                                    <h3>思维导图</h3>
-                                </div>
-                                <div class="testcases-mindmap" id="testcasesMindmap">
-                                    <div class="mindmap-placeholder">选择一个.md文件查看思维导图</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <div id="testcasesView" class="view hidden"></div>
                 
                 <div id="scenariosView" class="view hidden">
                     <div class="placeholder-view">
@@ -229,6 +163,12 @@
     <script src="/static/js/mindmap-editor.js"></script>
     <script src="/static/js/api.js"></script>
     <script src="/static/js/editor.js"></script>
+    <script src="/static/js/components/Panel.js"></script>
+    <script src="/static/js/components/PanelLayout.js"></script>
+    <script src="/static/js/components/DirectoryTree.js"></script>
+    <script src="/static/js/components/MarkdownEditorPanel.js"></script>
+    <script src="/static/js/components/MindmapPanel.js"></script>
+    <script src="/static/js/components/ChatPanel.js"></script>
     <script src="/static/js/testcases.js"></script>
     <script src="/static/js/knowledge.js"></script>
     <script src="/static/js/app.js"></script>
