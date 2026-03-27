@@ -1,0 +1,21 @@
+name: test-suite-executor
+description: 测试案例集执行者 - 负责批量执行测试案例集
+system_prompt_file: prompts/roles/test_suite_executor.txt
+model:
+  inherit: true
+execution:
+  max_context_tokens: 80000
+  timeout: 600
+  recursion_limit: 100
+  sub_agent_recursion_limit: 50
+  max_parallel_instances: 3
+available_tools:
+  - shell_tool
+  - spawn_agent
+  - browser_navigate
+  - browser_click
+  - browser_type
+  - browser_snapshot
+metadata:
+  version: "1.0"
+  author: "Rubato Team"

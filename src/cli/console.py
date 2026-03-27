@@ -15,13 +15,23 @@ class Console:
         agent: RubatoAgent,
         skill_loader: SkillLoader,
         mcp_manager: Optional[MCPManager] = None,
-        config: Optional[AppConfig] = None
+        config: Optional[AppConfig] = None,
+        role_manager: Optional['RoleManager'] = None,
+        config_loader: Optional['ConfigLoader'] = None,
+        app_state: Optional['AppState'] = None
     ):
         self.agent = agent
         self.skill_loader = skill_loader
         self.mcp_manager = mcp_manager
         self.config = config
-        self.command_handler = CommandHandler(agent, skill_loader, mcp_manager)
+        self.app_state = app_state
+        self.command_handler = CommandHandler(
+            agent, 
+            skill_loader, 
+            mcp_manager,
+            role_manager,
+            config_loader
+        )
     
     def _print_banner(self) -> None:
         """打印欢迎横幅"""

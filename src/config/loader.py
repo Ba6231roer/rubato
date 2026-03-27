@@ -6,7 +6,7 @@ from typing import Optional
 
 from .models import (
     AppConfig, FullModelConfig, MCPConfig, 
-    PromptConfig, SkillsConfig, ModelConfig
+    PromptConfig, SkillsConfig, ModelConfig, AgentConfig
 )
 from .validators import (
     ConfigValidationError, validate_required_configs,
@@ -27,12 +27,14 @@ class ConfigLoader:
         mcp_config = self._load_mcp_config()
         prompt_config = self._load_prompt_config()
         skills_config = self._load_skills_config()
+        agent_config = self._load_agent_config()
         
         return AppConfig(
             model=model_config,
             mcp=mcp_config,
             prompts=prompt_config,
-            skills=skills_config
+            skills=skills_config,
+            agent=agent_config
         )
     
     def _load_yaml(self, filename: str) -> dict:
@@ -105,6 +107,18 @@ class ConfigLoader:
         
         try:
             return SkillsConfig(**data.get('skills', {}))
+        except Exception as e:
+            if hasattr(e, 'errors'):
+                raise handle_pydantic_error(e)
+            raise
+    
+    def _load_agent_config(self) -> AgentConfig:
+        """加载Agent配置"""
+        try:
+            data = self._load_yaml("agent_config.yaml")
+            return AgentConfig(**data.get('agent', {}))
+        except ConfigValidationError:
+            return AgentConfig()
         except Exception as e:
             if hasattr(e, 'errors'):
                 raise handle_pydantic_error(e)

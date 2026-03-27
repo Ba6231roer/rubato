@@ -1,7 +1,10 @@
 from typing import Dict, Callable, Optional, Awaitable
 from ..core.agent import RubatoAgent
+from ..core.role_manager import RoleManager
 from ..skills.loader import SkillLoader
 from ..mcp.client import MCPManager
+from ..config.loader import ConfigLoader
+from ..config.validators import ConfigValidationError
 import asyncio
 
 
@@ -12,11 +15,15 @@ class CommandHandler:
         self,
         agent: RubatoAgent,
         skill_loader: SkillLoader,
-        mcp_manager: Optional[MCPManager] = None
+        mcp_manager: Optional[MCPManager] = None,
+        role_manager: Optional[RoleManager] = None,
+        config_loader: Optional[ConfigLoader] = None
     ):
         self.agent = agent
         self.skill_loader = skill_loader
         self.mcp_manager = mcp_manager
+        self.role_manager = role_manager
+        self.config_loader = config_loader
         self.commands: Dict[str, Callable] = {
             'help': self._cmd_help,
             'quit': self._cmd_quit,
@@ -28,6 +35,9 @@ class CommandHandler:
             'tool': self._cmd_tool,
             'prompt': self._cmd_prompt,
             'browser': self._cmd_browser,
+            'role': self._cmd_role,
+            'new': self._cmd_new,
+            'reload': self._cmd_reload,
         }
         self._running = True
     
@@ -88,10 +98,23 @@ class CommandHandler:
   /config        - 显示当前配置
   /history       - 显示对话历史
   /clear         - 清空对话历史
+  /new           - 开始新对话（清空上下文，保留角色和系统提示词）
+  /reload        - 重新加载所有配置（模型、角色、Skill）
+
+角色管理：
+  /role <name>   - 切换到指定角色
+  /role list     - 列出所有可用角色
+  /role show <name> - 显示角色详细信息
+
+Skill管理：
   /skill list    - 列出所有可用Skills
   /skill show <name> - 显示Skill详情
+
+工具管理：
   /tool list     - 列出所有可用工具
   /prompt show   - 显示当前系统提示词
+
+浏览器管理：
   /browser status - 查看浏览器状态
   /browser close  - 关闭浏览器
   /browser reopen - 重新打开浏览器
@@ -241,3 +264,143 @@ class CommandHandler:
         
         else:
             return "用法：/browser status | /browser close | /browser reopen"
+    
+    async def _cmd_role(self, args: str) -> str:
+        """角色相关命令"""
+        if not self.role_manager:
+            return "角色管理未启用，请检查 RoleManager 配置"
+        
+        parts = args.split(maxsplit=1)
+        sub_cmd = parts[0].lower() if parts else ""
+        role_name = parts[1] if len(parts) > 1 else ""
+        
+        if sub_cmd == "list":
+            return await self._role_list()
+        elif sub_cmd == "show":
+            if not role_name:
+                return "请指定角色名称：/role show <name>"
+            return await self._role_show(role_name)
+        elif sub_cmd:
+            return await self._role_switch(sub_cmd)
+        else:
+            return "用法：/role <name> | /role list | /role show <name>"
+    
+    async def _role_list(self) -> str:
+        """列出所有可用角色"""
+        roles = self.role_manager.list_roles()
+        if not roles:
+            return "没有可用的角色"
+        
+        current_role = self.role_manager.get_current_role()
+        current_name = current_role.name if current_role else None
+        
+        lines = ["可用角色："]
+        for role_name in roles:
+            role = self.role_manager.get_role(role_name)
+            if role:
+                marker = " (当前)" if role_name == current_name else ""
+                lines.append(f"  - {role_name}{marker}: {role.description}")
+        
+        return "\n".join(lines)
+    
+    async def _role_show(self, name: str) -> str:
+        """显示角色详细信息"""
+        info = self.role_manager.get_role_info(name)
+        if not info:
+            return f"未找到角色：{name}"
+        
+        lines = [
+            f"角色: {info['name']}",
+            f"描述: {info['description']}",
+            "",
+            "模型配置:",
+            f"  继承默认配置: {'是' if info['model']['inherit'] else '否'}",
+            f"  提供商: {info['model']['provider']}",
+            f"  模型: {info['model']['name']}",
+            f"  Temperature: {info['model']['temperature']}",
+            f"  Max Tokens: {info['model']['max_tokens']}",
+            "",
+            "执行参数:",
+            f"  最大上下文Token: {info['execution']['max_context_tokens']}",
+            f"  超时时间: {info['execution']['timeout']}秒",
+            f"  递归限制: {info['execution']['recursion_limit']}",
+            f"  子Agent递归限制: {info['execution']['sub_agent_recursion_limit']}",
+            "",
+            f"可用工具: {', '.join(info['available_tools']) if info['available_tools'] else '全部'}",
+        ]
+        
+        if info['metadata']:
+            lines.append("")
+            lines.append("元数据:")
+            for key, value in info['metadata'].items():
+                lines.append(f"  {key}: {value}")
+        
+        return "\n".join(lines)
+    
+    async def _role_switch(self, name: str) -> str:
+        """切换到指定角色"""
+        try:
+            if not self.role_manager.has_role(name):
+                return f"角色 '{name}' 不存在。使用 /role list 查看可用角色。"
+            
+            role = self.role_manager.switch_role(name)
+            
+            self.agent.context_manager.clear()
+            
+            new_prompt = self.role_manager.load_system_prompt(name)
+            self.agent.system_prompt = new_prompt
+            self.agent._current_system_prompt = new_prompt
+            self.agent.agent = self.agent._create_agent(new_prompt)
+            
+            merged_model = self.role_manager.get_merged_model_config(name)
+            if merged_model:
+                self.agent.llm = self.agent._create_llm()
+            
+            return f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。"
+            
+        except ConfigValidationError as e:
+            return f"切换角色失败：{str(e)}"
+        except Exception as e:
+            return f"切换角色时发生错误：{str(e)}"
+    
+    async def _cmd_new(self, args: str) -> str:
+        """清空当前对话历史，开始新对话"""
+        try:
+            self.agent.context_manager.clear()
+            
+            current_role = self.role_manager.get_current_role() if self.role_manager else None
+            if current_role:
+                system_prompt = self.role_manager.load_system_prompt(current_role.name)
+                self.agent.system_prompt = system_prompt
+                self.agent._current_system_prompt = system_prompt
+                self.agent.agent = self.agent._create_agent(system_prompt)
+            
+            return "新对话已开始。当前角色和系统提示词已保留，浏览器状态保持不变。"
+            
+        except Exception as e:
+            return f"开始新对话时发生错误：{str(e)}"
+    
+    async def _cmd_reload(self, args: str) -> str:
+        """重新加载所有配置"""
+        results = []
+        
+        try:
+            if self.role_manager:
+                self.role_manager.reload_roles()
+                results.append("✓ 角色配置已重新加载")
+            
+            if self.config_loader:
+                self.config_loader.load_all()
+                results.append("✓ 模型配置已重新加载")
+            
+            if self.skill_loader:
+                await self.skill_loader.load_skill_metadata()
+                results.append("✓ Skill配置已重新加载")
+            
+            if not results:
+                return "没有可重新加载的配置"
+            
+            return "配置重新加载完成：\n" + "\n".join(results)
+            
+        except Exception as e:
+            return f"重新加载配置时发生错误：{str(e)}"

@@ -48,7 +48,8 @@ def _estimate_tokens(messages: List) -> int:
     return total
 
 
-def _compress_messages(messages: List, max_tokens: int = 50000) -> List:
+def _compress_messages(messages: List, max_tokens: int = 50000, keep_recent: int = 6, 
+                       summary_max_length: int = 300, history_summary_count: int = 10) -> List:
     """压缩消息列表，保持在token限制内，确保消息链完整性"""
     current_tokens = _estimate_tokens(messages)
     
@@ -61,7 +62,6 @@ def _compress_messages(messages: List, max_tokens: int = 50000) -> List:
     if len(other_messages) <= 4:
         return messages
     
-    keep_recent = 6
     recent_messages = other_messages[-keep_recent:]
     old_messages = other_messages[:-keep_recent]
     
@@ -69,7 +69,7 @@ def _compress_messages(messages: List, max_tokens: int = 50000) -> List:
     for i, msg in enumerate(old_messages):
         role = "用户" if isinstance(msg, HumanMessage) else "AI" if isinstance(msg, AIMessage) else "工具"
         content_str = _content_to_str(msg.content)
-        content = content_str[:300] + "..." if len(content_str) > 300 else content_str
+        content = content_str[:summary_max_length] + "..." if len(content_str) > summary_max_length else content_str
         
         if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
             tool_names = [tc.get('name', 'unknown') for tc in msg.tool_calls]
@@ -77,7 +77,7 @@ def _compress_messages(messages: List, max_tokens: int = 50000) -> List:
         else:
             summary_parts.append(f"[{role}]: {content}")
     
-    summary = HumanMessage(content=f"[历史摘要]\n" + "\n".join(summary_parts[-10:]))
+    summary = HumanMessage(content=f"[历史摘要]\n" + "\n".join(summary_parts[-history_summary_count:]))
     
     valid_recent = _ensure_message_chain_valid(recent_messages)
     
@@ -154,6 +154,9 @@ class RubatoAgent:
         self.max_context_tokens = config.agent.max_context_tokens
         self.recursion_limit = config.agent.execution.recursion_limit
         
+        self.compression_config = config.agent.message_compression
+        self.logging_config = config.agent.logging
+        
         init_sub_agent_manager(self.llm, "sub_agents", config.agent.execution.sub_agent_recursion_limit)
         
         self.tools = get_all_tools() + [spawn_agent, ShellTool()]
@@ -164,7 +167,8 @@ class RubatoAgent:
             "model": config.model.model.name,
             "tool_count": len(self.tools),
             "max_context_tokens": self.max_context_tokens,
-            "recursion_limit": self.recursion_limit
+            "recursion_limit": self.recursion_limit,
+            "compression_enabled": self.compression_config.enabled
         })
     
     def _create_agent(self, system_prompt: str):
@@ -172,15 +176,27 @@ class RubatoAgent:
         def pre_model_hook(state):
             messages = state.get("messages", [])
             
-            compressed = _compress_messages(messages, self.max_context_tokens)
+            if self.compression_config.enabled:
+                compressed = _compress_messages(
+                    messages, 
+                    max_tokens=self.compression_config.max_tokens,
+                    keep_recent=self.compression_config.keep_recent,
+                    summary_max_length=self.compression_config.summary_max_length,
+                    history_summary_count=self.compression_config.history_summary_count
+                )
+            else:
+                compressed = messages
+            
             converted = _convert_messages_for_api(compressed)
             
-            token_estimate = _estimate_tokens(compressed)
-            self.logger.log_agent_action("pre_model_hook", {
-                "original_messages": len(messages),
-                "compressed_messages": len(compressed),
-                "estimated_tokens": token_estimate
-            })
+            if self.logging_config.log_token_estimation:
+                token_estimate = _estimate_tokens(compressed)
+                self.logger.log_agent_action("pre_model_hook", {
+                    "original_messages": len(messages),
+                    "compressed_messages": len(compressed),
+                    "estimated_tokens": token_estimate,
+                    "compression_enabled": self.compression_config.enabled
+                })
             
             return {"llm_input_messages": converted}
         
@@ -413,3 +429,16 @@ class RubatoAgent:
     def clear_context(self) -> None:
         """清空上下文"""
         self.context_manager.clear()
+    
+    def update_config(self, new_config: AppConfig) -> None:
+        """更新配置（支持热重载）"""
+        self.max_context_tokens = new_config.agent.max_context_tokens
+        self.recursion_limit = new_config.agent.execution.recursion_limit
+        self.compression_config = new_config.agent.message_compression
+        self.logging_config = new_config.agent.logging
+        
+        self.logger.log_agent_action("config_updated", {
+            "max_context_tokens": self.max_context_tokens,
+            "recursion_limit": self.recursion_limit,
+            "compression_enabled": self.compression_config.enabled
+        })

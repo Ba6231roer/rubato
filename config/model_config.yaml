@@ -15,9 +15,3 @@ parameters:
   retry_times: 3
   retry_delay: 1.0
   timeout: 30.0
-
-agent:
-  max_context_tokens: 80000
-  execution:
-    recursion_limit: 100
-    sub_agent_recursion_limit: 50

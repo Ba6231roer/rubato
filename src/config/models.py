@@ -1,5 +1,55 @@
 from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+
+
+class RoleModelConfig(BaseModel):
+    inherit: bool = True
+    provider: Optional[str] = None
+    name: Optional[str] = None
+    api_key: Optional[str] = None
+    base_url: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+
+    @field_validator('temperature')
+    @classmethod
+    def validate_temperature(cls, v):
+        if v is not None and not 0 <= v <= 1:
+            raise ValueError('temperature must be between 0 and 1')
+        return v
+
+
+class RoleExecutionConfig(BaseModel):
+    max_context_tokens: int = 80000
+    timeout: int = 300
+    recursion_limit: Optional[int] = None
+    sub_agent_recursion_limit: Optional[int] = None
+
+    @field_validator('max_context_tokens', 'timeout')
+    @classmethod
+    def validate_positive(cls, v):
+        if v <= 0:
+            raise ValueError('must be positive')
+        return v
+
+
+class RoleConfig(BaseModel):
+    name: str
+    description: str
+    system_prompt_file: str
+    model: RoleModelConfig = RoleModelConfig()
+    execution: RoleExecutionConfig = RoleExecutionConfig()
+    available_tools: List[str] = []
+    metadata: Optional[Dict[str, Any]] = None
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('name cannot be empty')
+        if not v.replace('-', '').replace('_', '').isalnum():
+            raise ValueError('name can only contain letters, numbers, hyphens and underscores')
+        return v.strip().lower()
 
 
 class ModelConfig(BaseModel):
@@ -124,8 +174,9 @@ class SkillsConfig(BaseModel):
 class AgentExecutionConfig(BaseModel):
     recursion_limit: int = 100
     sub_agent_recursion_limit: int = 50
+    default_timeout: int = 300
 
-    @field_validator('recursion_limit', 'sub_agent_recursion_limit')
+    @field_validator('recursion_limit', 'sub_agent_recursion_limit', 'default_timeout')
     @classmethod
     def validate_positive(cls, v):
         if v <= 0:
@@ -133,9 +184,39 @@ class AgentExecutionConfig(BaseModel):
         return v
 
 
+class MessageCompressionConfig(BaseModel):
+    enabled: bool = True
+    max_tokens: int = 50000
+    keep_recent: int = 6
+    summary_max_length: int = 300
+    history_summary_count: int = 10
+
+    @field_validator('max_tokens', 'keep_recent', 'summary_max_length', 'history_summary_count')
+    @classmethod
+    def validate_positive(cls, v):
+        if v <= 0:
+            raise ValueError('must be positive')
+        return v
+
+
+class AgentLoggingConfig(BaseModel):
+    log_token_estimation: bool = True
+    log_compression_stats: bool = True
+    log_step_details: bool = True
+
+
 class AgentConfig(BaseModel):
     max_context_tokens: int = 80000
+    message_compression: MessageCompressionConfig = MessageCompressionConfig()
     execution: AgentExecutionConfig = AgentExecutionConfig()
+    logging: AgentLoggingConfig = AgentLoggingConfig()
+
+    @field_validator('max_context_tokens')
+    @classmethod
+    def validate_positive(cls, v):
+        if v <= 0:
+            raise ValueError('must be positive')
+        return v
 
 
 class AppConfig(BaseModel):

@@ -1,0 +1,19 @@
+agent:
+  max_context_tokens: 80000
+  
+  message_compression:
+    enabled: true
+    max_tokens: 50000
+    keep_recent: 6
+    summary_max_length: 300
+    history_summary_count: 10
+  
+  execution:
+    recursion_limit: 100
+    sub_agent_recursion_limit: 50
+    default_timeout: 300
+  
+  logging:
+    log_token_estimation: true
+    log_compression_stats: true
+    log_step_details: true
