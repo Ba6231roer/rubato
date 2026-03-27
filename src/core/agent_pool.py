@@ -11,8 +11,12 @@ from ..config.models import AppConfig, RoleConfig
 from ..config.loader import ConfigLoader
 from ..context.manager import ContextManager
 from ..skills.loader import SkillLoader
+from ..mcp.tools import ToolRegistry
+from ..tools.provider import LocalToolProvider, ShellToolProvider
+from ..tools.mcp_provider import MCPToolProvider
 from .agent import RubatoAgent
 from .role_manager import RoleManager
+from .sub_agents import spawn_agent
 from ..utils.logger import get_llm_logger
 
 
@@ -29,6 +33,7 @@ class AgentInstance:
     agent: RubatoAgent
     context_manager: ContextManager
     skill_loader: SkillLoader
+    tool_registry: ToolRegistry
     role_name: Optional[str] = None
     status: InstanceStatus = InstanceStatus.IDLE
     created_at: datetime = field(default_factory=datetime.now)
@@ -137,6 +142,26 @@ class AgentPool:
     def _create_skill_loader(self) -> SkillLoader:
         return SkillLoader(self.skills_dir)
 
+    def _create_tool_registry(
+        self,
+        mcp_manager=None,
+        role_config: Optional[RoleConfig] = None
+    ) -> ToolRegistry:
+        registry = ToolRegistry()
+        
+        local_provider = LocalToolProvider([spawn_agent])
+        registry.register_provider(local_provider)
+        
+        shell_provider = ShellToolProvider()
+        registry.register_provider(shell_provider)
+        
+        if mcp_manager is not None:
+            mcp_config = self.config.mcp.model_dump() if self.config.mcp else {}
+            mcp_provider = MCPToolProvider(mcp_config, mcp_manager)
+            registry.register_provider(mcp_provider)
+        
+        return registry
+
     async def create_instance(
         self,
         instance_id: Optional[str] = None,
@@ -161,11 +186,18 @@ class AgentPool:
         context_manager = self._create_context_manager(role_config)
         skill_loader = self._create_skill_loader()
         await skill_loader.load_skill_metadata()
+        
+        tool_registry = self._create_tool_registry(
+            mcp_manager=None,
+            role_config=role_config
+        )
 
         agent = RubatoAgent(
             config=self.config,
             skill_loader=skill_loader,
-            context_manager=context_manager
+            context_manager=context_manager,
+            tool_registry=tool_registry,
+            role_config=role_config
         )
 
         if system_prompt:
@@ -178,6 +210,7 @@ class AgentPool:
             agent=agent,
             context_manager=context_manager,
             skill_loader=skill_loader,
+            tool_registry=tool_registry,
             role_name=effective_role_name
         )
 

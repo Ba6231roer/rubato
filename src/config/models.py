@@ -143,8 +143,17 @@ class PlaywrightConfig(BaseModel):
     execution: ExecutionConfig = ExecutionConfig()
 
 
+class MCPServerConfig(BaseModel):
+    enabled: bool = True
+    command: str
+    args: List[str] = []
+    connection: Optional[dict] = None
+    browser: Optional[dict] = None
+    execution: Optional[dict] = None
+
+
 class MCPConfig(BaseModel):
-    playwright: PlaywrightConfig
+    servers: Dict[str, MCPServerConfig] = {}
 
 
 class PromptVariables(BaseModel):
@@ -221,7 +230,19 @@ class AgentConfig(BaseModel):
 
 class AppConfig(BaseModel):
     model: FullModelConfig
-    mcp: MCPConfig
+    mcp: Optional[MCPConfig] = None
     prompts: PromptConfig
     skills: SkillsConfig
     agent: AgentConfig = AgentConfig()
+
+    @classmethod
+    def migrate_old_config(cls, data: dict) -> dict:
+        if 'mcp' in data and data['mcp'] is not None:
+            mcp_data = data['mcp']
+            if 'servers' not in mcp_data:
+                servers = {}
+                for server_name, server_config in mcp_data.items():
+                    if isinstance(server_config, dict) and 'command' in server_config:
+                        servers[server_name] = server_config
+                data['mcp'] = {'servers': servers}
+        return data

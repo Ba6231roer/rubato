@@ -1,7 +1,7 @@
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 from langchain_core.tools import BaseTool
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import asyncio
 
 from .errors import MCPConnectionError
@@ -20,6 +20,10 @@ class MCPManager:
     - 移除 --isolated 参数后，浏览器 profile 保存在磁盘
     - 程序退出时不关闭浏览器，下次任务继续复用
     - 只有用户手动关闭浏览器时才关闭
+    
+    支持多服务器配置：
+    - config 格式: {server_name: {command, args, connection, ...}, ...}
+    - 会连接所有配置的服务器并聚合工具
     """
     
     def __init__(self, config: dict):
@@ -27,8 +31,8 @@ class MCPManager:
         self._client: Optional[MultiServerMCPClient] = None
         self._tools: List[BaseTool] = []
         self._connected = False
-        self._session_cm = None
-        self._session = None
+        self._sessions: Dict[str, Any] = {}
+        self._session_cms: Dict[str, Any] = {}
         self._browser_alive = False
     
     async def __aenter__(self) -> "MCPManager":
@@ -41,59 +45,88 @@ class MCPManager:
         await self.disconnect(close_browser=False)
     
     async def connect(self) -> None:
-        """连接到MCP服务器（带重试机制）"""
-        playwright_config = self.config.get("playwright", {})
-        connection_config = playwright_config.get("connection", {})
+        """连接到所有配置的MCP服务器（带重试机制）"""
+        if not self.config:
+            raise MCPConnectionError("MCP配置为空")
         
-        retry_times = connection_config.get("retry_times", 3)
-        retry_delay = connection_config.get("retry_delay", 5)
-        timeout = connection_config.get("timeout", 30)
+        connections = {}
+        server_configs = {}
         
-        connection = {
-            "command": playwright_config.get("command", "npx"),
-            "args": playwright_config.get("args", ["-y", "@playwright/mcp"]),
-            "transport": "stdio",
-        }
-        
-        last_error = None
-        for attempt in range(retry_times):
-            try:
-                self._client = MultiServerMCPClient({
-                    "playwright": connection
-                })
-                
-                self._session_cm = self._client.session("playwright")
-                self._session = await self._session_cm.__aenter__()
-                await self._session.initialize()
-                
-                self._tools = await asyncio.wait_for(
-                    load_mcp_tools(self._session),
-                    timeout=timeout
-                )
-                self._connected = True
-                self._browser_alive = True
-                return
-            except asyncio.TimeoutError:
-                last_error = f"MCP连接超时（{timeout}秒）"
-                await self._cleanup_session()
-            except Exception as e:
-                last_error = f"MCP连接失败：{str(e)}"
-                await self._cleanup_session()
+        for server_name, server_config in self.config.items():
+            if not isinstance(server_config, dict):
+                continue
             
-            if attempt < retry_times - 1:
-                await asyncio.sleep(retry_delay)
+            command = server_config.get("command")
+            if not command:
+                continue
+            
+            args = server_config.get("args", [])
+            connection_cfg = server_config.get("connection", {})
+            
+            connections[server_name] = {
+                "command": command,
+                "args": args,
+                "transport": "stdio",
+            }
+            server_configs[server_name] = connection_cfg
         
-        raise MCPConnectionError(f"无法连接MCP服务器，已重试{retry_times}次。最后错误：{last_error}")
+        if not connections:
+            raise MCPConnectionError("没有有效的MCP服务器配置")
+        
+        self._client = MultiServerMCPClient(connections)
+        
+        for server_name, connection_cfg in server_configs.items():
+            retry_times = connection_cfg.get("retry_times", 3)
+            retry_delay = connection_cfg.get("retry_delay", 5)
+            timeout = connection_cfg.get("timeout", 30)
+            
+            last_error = None
+            for attempt in range(retry_times):
+                try:
+                    session_cm = self._client.session(server_name)
+                    session = await session_cm.__aenter__()
+                    await session.initialize()
+                    
+                    self._session_cms[server_name] = session_cm
+                    self._sessions[server_name] = session
+                    
+                    server_tools = await asyncio.wait_for(
+                        load_mcp_tools(session),
+                        timeout=timeout
+                    )
+                    self._tools.extend(server_tools)
+                    
+                    if server_name == "playwright":
+                        self._browser_alive = True
+                    
+                    break
+                except asyncio.TimeoutError:
+                    last_error = f"MCP连接超时（{timeout}秒）"
+                    await self._cleanup_server_session(server_name)
+                except Exception as e:
+                    last_error = f"MCP连接失败：{str(e)}"
+                    await self._cleanup_server_session(server_name)
+                
+                if attempt < retry_times - 1:
+                    await asyncio.sleep(retry_delay)
+            
+            if last_error and server_name not in self._sessions:
+                print(f"警告: 服务器 {server_name} 连接失败: {last_error}")
+        
+        if self._sessions:
+            self._connected = True
+        else:
+            raise MCPConnectionError("无法连接任何MCP服务器")
     
-    async def _cleanup_session(self):
-        """清理 session 资源"""
-        if self._session_cm:
+    async def _cleanup_server_session(self, server_name: str):
+        """清理指定服务器的 session 资源"""
+        if server_name in self._session_cms:
             try:
-                await self._session_cm.__aexit__(None, None, None)
+                await self._session_cms[server_name].__aexit__(None, None, None)
             except:
                 pass
-        self._session_cm = None
-        self._session = None
+        self._session_cms.pop(server_name, None)
+        self._sessions.pop(server_name, None)
     
     def get_tools(self) -> List[BaseTool]:
         """获取所有MCP工具"""
@@ -117,12 +150,13 @@ class MCPManager:
         通过调用 browser_snapshot 来检测浏览器是否还在运行。
         如果调用成功，说明浏览器存活；如果失败，说明浏览器已被关闭。
         """
-        if not self._session:
+        session = self._sessions.get("playwright")
+        if not session:
             self._browser_alive = False
             return False
         
         try:
-            await self._session.call_tool("browser_snapshot", {})
+            await session.call_tool("browser_snapshot", {})
             self._browser_alive = True
             return True
         except Exception:
@@ -140,14 +174,43 @@ class MCPManager:
         
         print("\n[系统] 检测到浏览器已关闭，正在重新初始化...")
         
-        await self._cleanup_session()
-        self._client = None
+        await self._cleanup_server_session("playwright")
         self._tools = []
         self._connected = False
         
+        playwright_config = self.config.get("playwright")
+        if not playwright_config:
+            return False
+        
         try:
-            await self.connect()
-            return True
+            connection_cfg = playwright_config.get("connection", {})
+            retry_times = connection_cfg.get("retry_times", 3)
+            retry_delay = connection_cfg.get("retry_delay", 5)
+            timeout = connection_cfg.get("timeout", 30)
+            
+            for attempt in range(retry_times):
+                try:
+                    session_cm = self._client.session("playwright")
+                    session = await session_cm.__aenter__()
+                    await session.initialize()
+                    
+                    self._session_cms["playwright"] = session_cm
+                    self._sessions["playwright"] = session
+                    
+                    server_tools = await asyncio.wait_for(
+                        load_mcp_tools(session),
+                        timeout=timeout
+                    )
+                    self._tools.extend(server_tools)
+                    self._browser_alive = True
+                    self._connected = bool(self._sessions)
+                    return True
+                except Exception:
+                    await self._cleanup_server_session("playwright")
+                    if attempt < retry_times - 1:
+                        await asyncio.sleep(retry_delay)
+            
+            return False
         except Exception as e:
             print(f"\n[系统] 浏览器重新初始化失败: {e}")
             return False
@@ -157,11 +220,12 @@ class MCPManager:
         
         返回 True 表示关闭成功，False 表示关闭失败。
         """
-        if not self._session:
+        session = self._sessions.get("playwright")
+        if not session:
             return False
         
         try:
-            await self._session.call_tool("browser_close", {})
+            await session.call_tool("browser_close", {})
             self._browser_alive = False
             return True
         except Exception as e:
@@ -169,15 +233,17 @@ class MCPManager:
             return False
     
     async def disconnect(self, close_browser: bool = False) -> None:
-        """断开MCP连接
+        """断开所有MCP连接
         
         Args:
             close_browser: 是否关闭浏览器（默认不关闭）
         """
-        if close_browser and self._session:
+        if close_browser:
             await self.close_browser()
         
-        await self._cleanup_session()
+        for server_name in list(self._sessions.keys()):
+            await self._cleanup_server_session(server_name)
+        
         self._client = None
         self._tools = []
         self._connected = False

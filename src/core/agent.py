@@ -1,13 +1,13 @@
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
-from langchain_community.tools import ShellTool
+from langchain_core.tools import BaseTool
 from typing import List, Optional
 import time
 
 from ..config.loader import ConfigLoader
-from ..config.models import AppConfig
-from ..mcp.tools import get_all_tools
+from ..config.models import AppConfig, RoleConfig
+from ..mcp.tools import ToolRegistry
 from ..skills.loader import SkillLoader
 from ..context.manager import ContextManager
 from .sub_agents import spawn_agent, init_sub_agent_manager
@@ -139,12 +139,16 @@ class RubatoAgent:
         config: AppConfig,
         skill_loader: SkillLoader,
         context_manager: ContextManager,
-        mcp_manager = None
+        tool_registry: ToolRegistry,
+        mcp_manager = None,
+        role_config: Optional[RoleConfig] = None
     ):
         self.config = config
         self.skill_loader = skill_loader
         self.context_manager = context_manager
+        self.tool_registry = tool_registry
         self.mcp_manager = mcp_manager
+        self.role_config = role_config
         self.logger = get_llm_logger()
         
         self.llm = self._create_llm()
@@ -159,7 +163,7 @@ class RubatoAgent:
         
         init_sub_agent_manager(self.llm, "sub_agents", config.agent.execution.sub_agent_recursion_limit)
         
-        self.tools = get_all_tools() + [spawn_agent, ShellTool()]
+        self.tools = self._get_tools_for_role()
         
         self.agent = self._create_agent(self.system_prompt)
         
@@ -224,6 +228,30 @@ class RubatoAgent:
         return ChatOpenAI(
             **llm_kwargs
         )
+    
+    def _get_tools_for_role(self) -> List[BaseTool]:
+        """根据角色配置获取可用工具
+        
+        Returns:
+            List[BaseTool]: 工具列表
+        """
+        all_tools = self.tool_registry.get_all_tools()
+        
+        if self.role_config and self.role_config.available_tools:
+            available_tool_names = set(self.role_config.available_tools)
+            filtered_tools = [tool for tool in all_tools if tool.name in available_tool_names]
+            self.logger.log_agent_action("tools_filtered_by_role", {
+                "role_name": self.role_config.name,
+                "requested_tools": list(available_tool_names),
+                "available_tools": [tool.name for tool in filtered_tools]
+            })
+            return filtered_tools
+        
+        self.logger.log_agent_action("tools_loaded", {
+            "tool_count": len(all_tools),
+            "tool_names": [tool.name for tool in all_tools]
+        })
+        return all_tools
     
     def _load_system_prompt(self) -> str:
         """加载系统提示词"""

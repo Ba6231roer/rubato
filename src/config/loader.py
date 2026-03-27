@@ -84,7 +84,9 @@ class ConfigLoader:
         data = self._load_yaml("mcp_config.yaml")
         
         try:
-            return MCPConfig(**data.get('mcp', {}))
+            mcp_data = data.get('mcp', {})
+            migrated_data = AppConfig.migrate_old_config({'mcp': mcp_data})
+            return MCPConfig(**migrated_data.get('mcp', {}))
         except Exception as e:
             if hasattr(e, 'errors'):
                 raise handle_pydantic_error(e)

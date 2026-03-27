@@ -17,6 +17,63 @@ from src.core.role_manager import RoleManager
 from src.cli.console import Console
 
 
+def build_mcp_config(config) -> Dict[str, Any]:
+    """构建MCP配置字典
+    
+    从 config.mcp.servers 中提取启用的服务器配置
+    
+    Args:
+        config: 应用配置对象
+        
+    Returns:
+        Dict: MCP配置字典，格式为 {server_name: {command, args, connection, ...}, ...}
+    """
+    if not config.mcp or not config.mcp.servers:
+        return {}
+    
+    mcp_config = {}
+    for server_name, server_config in config.mcp.servers.items():
+        if not server_config.enabled:
+            continue
+        
+        server_cfg = {
+            "command": server_config.command,
+            "args": server_config.args or [],
+        }
+        
+        if server_config.connection:
+            server_cfg["connection"] = server_config.connection
+        else:
+            server_cfg["connection"] = {
+                "retry_times": 3,
+                "retry_delay": 5,
+                "timeout": 30,
+            }
+        
+        if server_config.browser:
+            server_cfg["browser"] = server_config.browser
+        
+        if server_config.execution:
+            server_cfg["execution"] = server_config.execution
+        
+        mcp_config[server_name] = server_cfg
+    
+    return mcp_config
+
+
+def has_enabled_mcp_servers(config) -> bool:
+    """检查是否有启用的MCP服务器
+    
+    Args:
+        config: 应用配置对象
+        
+    Returns:
+        bool: 是否有启用的MCP服务器
+    """
+    mcp_config = build_mcp_config(config)
+    return bool(mcp_config)
+
+
 class AppState:
     """应用状态管理器，支持多Agent实例"""
     
@@ -354,17 +411,7 @@ class AppState:
 
 
 async def run_with_mcp(config, skill_loader, context_manager, config_loader) -> None:
-    mcp_config = {
-        "playwright": {
-            "command": config.mcp.playwright.command,
-            "args": config.mcp.playwright.args,
-            "connection": {
-                "retry_times": config.mcp.playwright.connection.retry_times,
-                "retry_delay": config.mcp.playwright.connection.retry_delay,
-                "timeout": config.mcp.playwright.connection.timeout,
-            }
-        }
-    }
+    mcp_config = build_mcp_config(config)
     
     mcp_manager = MCPManager(mcp_config)
     await mcp_manager.connect()
@@ -461,19 +508,9 @@ async def run_web_mode(port: int = 8000) -> None:
     app_state = AppState()
     
     mcp_manager = None
-    if config.mcp.playwright.enabled:
+    if has_enabled_mcp_servers(config):
         print("正在连接MCP服务器...")
-        mcp_config = {
-            "playwright": {
-                "command": config.mcp.playwright.command,
-                "args": config.mcp.playwright.args,
-                "connection": {
-                    "retry_times": config.mcp.playwright.connection.retry_times,
-                    "retry_delay": config.mcp.playwright.connection.retry_delay,
-                    "timeout": config.mcp.playwright.connection.timeout,
-                }
-            }
-        }
+        mcp_config = build_mcp_config(config)
         
         try:
             mcp_manager = MCPManager(mcp_config)
@@ -560,7 +597,7 @@ async def main_async() -> None:
         auto_compress=True
     )
     
-    if config.mcp.playwright.enabled:
+    if has_enabled_mcp_servers(config):
         print("正在连接MCP服务器...")
         try:
             await run_with_mcp(config, skill_loader, context_manager, config_loader)

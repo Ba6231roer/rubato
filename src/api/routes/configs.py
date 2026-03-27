@@ -114,7 +114,9 @@ async def get_status():
             if hasattr(state.config, 'model') and state.config.model:
                 model_name = state.config.model.model.name if state.config.model.model else "unknown"
             if hasattr(state.config, 'mcp') and state.config.mcp:
-                mcp_enabled = state.config.mcp.playwright.enabled if state.config.mcp.playwright else False
+                if hasattr(state.config.mcp, 'servers') and state.config.mcp.servers:
+                    playwright_config = state.config.mcp.servers.get('playwright')
+                    mcp_enabled = playwright_config.enabled if playwright_config else False
         
         if hasattr(state, 'mcp_manager') and state.mcp_manager:
             mcp_connected = True
