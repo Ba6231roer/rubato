@@ -86,6 +86,26 @@ const API = {
             body: JSON.stringify({ path, content })
         });
         return response.json();
+    },
+    
+    async getCommands() {
+        const response = await fetch(`${this.baseUrl}/api/commands`);
+        return response.json();
+    },
+    
+    async executeCommand(command) {
+        const response = await fetch(`${this.baseUrl}/api/command`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ command })
+        });
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.detail || '命令执行失败');
+        }
+        return response.json();
     }
 };
 

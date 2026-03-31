@@ -478,7 +478,9 @@ async def run_web_mode(port: int = 8000) -> None:
     import uvicorn
     from src.api.app import create_app
     from src.api.routes.configs import set_app_state as set_config_state
-    from src.api.websocket import set_app_state as set_ws_state
+    from src.api.websocket import set_app_state as set_ws_state, init_command_dispatcher as init_ws_dispatcher
+    from src.api.routes.commands import init_dispatcher as init_http_dispatcher
+    from src.commands.context import CommandContext
     
     print()
     print("=" * 60)
@@ -536,6 +538,17 @@ async def run_web_mode(port: int = 8000) -> None:
     
     set_config_state(app_state)
     set_ws_state(app_state)
+    
+    command_context = CommandContext(
+        agent=app_state.agent,
+        skill_loader=skill_loader,
+        mcp_manager=mcp_manager,
+        role_manager=app_state.role_manager,
+        config_loader=config_loader,
+        config=config
+    )
+    init_ws_dispatcher(command_context)
+    init_http_dispatcher(command_context)
     
     app = create_app()
     

@@ -6,6 +6,7 @@ class App {
         this.isStreaming = false;
         this.knowledgeManager = null;
         this.testcaseManager = null;
+        this.commands = [];
         
         this.elements = {
             configNav: document.getElementById('configNav'),
@@ -37,6 +38,7 @@ class App {
         this.initSidebarToggle();
         this.loadStatus();
         this.loadSkills();
+        this.loadCommands();
         
         setInterval(() => this.loadStatus(), 30000);
     }
@@ -165,6 +167,9 @@ class App {
         switch (data.type) {
             case 'connected':
                 console.log('WS connected:', data.content);
+                break;
+            case 'command_result':
+                this.handleCommandResult(data.content);
                 break;
             case 'chunk':
                 this.appendAIMessage(data.content);
@@ -303,6 +308,163 @@ class App {
     
     updateConnectionStatus(connected) {
         console.log('WebSocket connection status:', connected);
+    }
+    
+    async loadCommands() {
+        try {
+            this.commands = await API.getCommands();
+            this.initCommandAutocomplete();
+        } catch (error) {
+            console.error('Failed to load commands:', error);
+        }
+    }
+    
+    initCommandAutocomplete() {
+        if (!this.elements.chatInput) return;
+        
+        this.elements.chatInput.addEventListener('input', (e) => {
+            const value = e.target.value;
+            if (value.startsWith('/')) {
+                this.showCommandSuggestions(value);
+            } else {
+                this.hideCommandSuggestions();
+            }
+        });
+    }
+    
+    showCommandSuggestions(input) {
+        const partial = input.slice(1).toLowerCase();
+        const matches = this.commands.filter(cmd => 
+            cmd.name.startsWith(partial) ||
+            cmd.aliases.some(a => a.startsWith(partial))
+        );
+        
+        if (matches.length === 0) {
+            this.hideCommandSuggestions();
+            return;
+        }
+        
+        let suggestionsEl = document.getElementById('command-suggestions');
+        if (!suggestionsEl) {
+            suggestionsEl = document.createElement('div');
+            suggestionsEl.id = 'command-suggestions';
+            suggestionsEl.className = 'command-suggestions';
+            this.elements.chatInput.parentNode.style.position = 'relative';
+            this.elements.chatInput.parentNode.appendChild(suggestionsEl);
+        }
+        
+        suggestionsEl.innerHTML = matches.map(cmd => `
+            <div class="suggestion-item" data-command="/${cmd.name}">
+                <span class="suggestion-cmd">/${cmd.name}</span>
+                <span class="suggestion-desc">${cmd.description}</span>
+            </div>
+        `).join('');
+        
+        suggestionsEl.querySelectorAll('.suggestion-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.elements.chatInput.value = item.dataset.command + ' ';
+                this.hideCommandSuggestions();
+                this.elements.chatInput.focus();
+            });
+        });
+    }
+    
+    hideCommandSuggestions() {
+        const suggestionsEl = document.getElementById('command-suggestions');
+        if (suggestionsEl) {
+            suggestionsEl.remove();
+        }
+    }
+    
+    handleCommandResult(result) {
+        const msgEl = document.getElementById('current-ai-message');
+        if (msgEl) {
+            const contentEl = msgEl.querySelector('.message-content');
+            if (result.data) {
+                this.renderStructuredResult(contentEl, result);
+            } else {
+                contentEl.textContent = result.message;
+            }
+            contentEl.classList.remove('streaming');
+            msgEl.removeAttribute('id');
+        }
+        
+        this.isStreaming = false;
+        this.elements.sendBtn.disabled = false;
+    }
+    
+    renderStructuredResult(container, result) {
+        if (result.data.roles) {
+            container.innerHTML = this.renderRoleList(result.data.roles);
+        } else if (result.data.skills) {
+            container.innerHTML = this.renderSkillList(result.data.skills);
+        } else if (result.data.tools) {
+            container.innerHTML = this.renderToolList(result.data.tools);
+        } else if (result.data.history) {
+            container.innerHTML = this.renderHistoryList(result.data.history);
+        } else {
+            container.innerHTML = `<pre>${this.escapeHtml(result.message)}</pre>`;
+        }
+    }
+    
+    renderRoleList(roles) {
+        return `
+            <div class="result-list">
+                <h4>可用角色</h4>
+                <ul>
+                    ${roles.map(r => `
+                        <li class="${r.is_current ? 'current' : ''}">
+                            <strong>${r.name}</strong>${r.is_current ? ' (当前)' : ''}: ${r.description}
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    renderSkillList(skills) {
+        return `
+            <div class="result-list">
+                <h4>可用Skills</h4>
+                <ul>
+                    ${skills.map(s => `
+                        <li>
+                            <strong>${s.name}</strong>: ${s.description}
+                            ${s.triggers && s.triggers.length ? `<br><small>触发词: ${s.triggers.join(', ')}</small>` : ''}
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    renderToolList(tools) {
+        return `
+            <div class="result-list">
+                <h4>可用工具</h4>
+                <ul>
+                    ${tools.map(t => `
+                        <li><strong>${t.name}</strong>: ${t.description}</li>
+                    `).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    renderHistoryList(history) {
+        return `
+            <div class="result-list">
+                <h4>对话历史</h4>
+                <ul>
+                    ${history.map(h => `
+                        <li>
+                            <span class="msg-type">${h.type}</span>: 
+                            ${this.escapeHtml(h.content.substring(0, 100))}${h.content.length > 100 ? '...' : ''}
+                        </li>
+                    `).join('')}
+                </ul>
+            </div>
+        `;
     }
 }
 

@@ -70,3 +70,21 @@ class TestCaseFileUpdateRequest(BaseModel):
 class TestCaseFileUpdateResponse(BaseModel):
     success: bool
     message: str
+
+
+class CommandRequest(BaseModel):
+    command: str
+
+
+class CommandInfo(BaseModel):
+    name: str
+    aliases: List[str]
+    description: str
+    usage: str
+
+
+class CommandResponse(BaseModel):
+    type: str
+    message: str
+    data: Optional[dict] = None
+    actions: List[str] = []

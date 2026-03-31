@@ -155,13 +155,28 @@ class RubatoAgent:
         self.system_prompt = self._load_system_prompt()
         self._current_system_prompt = self.system_prompt
         
-        self.max_context_tokens = config.agent.max_context_tokens
-        self.recursion_limit = config.agent.execution.recursion_limit
+        self.max_context_tokens = (
+            role_config.execution.max_context_tokens
+            if role_config and role_config.execution and role_config.execution.max_context_tokens
+            else config.agent.max_context_tokens
+        )
+        
+        self.recursion_limit = (
+            role_config.execution.recursion_limit
+            if role_config and role_config.execution and role_config.execution.recursion_limit
+            else config.agent.execution.recursion_limit
+        )
         
         self.compression_config = config.agent.message_compression
         self.logging_config = config.agent.logging
         
-        init_sub_agent_manager(self.llm, "sub_agents", config.agent.execution.sub_agent_recursion_limit)
+        sub_agent_recursion_limit = (
+            role_config.execution.sub_agent_recursion_limit
+            if role_config and role_config.execution and role_config.execution.sub_agent_recursion_limit
+            else config.agent.execution.sub_agent_recursion_limit
+        )
+        
+        init_sub_agent_manager(self.llm, "sub_agents", sub_agent_recursion_limit)
         
         self.tools = self._get_tools_for_role()
         
@@ -460,8 +475,20 @@ class RubatoAgent:
     
     def update_config(self, new_config: AppConfig) -> None:
         """更新配置（支持热重载）"""
-        self.max_context_tokens = new_config.agent.max_context_tokens
-        self.recursion_limit = new_config.agent.execution.recursion_limit
+        self.config = new_config
+        
+        self.max_context_tokens = (
+            self.role_config.execution.max_context_tokens
+            if self.role_config and self.role_config.execution and self.role_config.execution.max_context_tokens
+            else new_config.agent.max_context_tokens
+        )
+        
+        self.recursion_limit = (
+            self.role_config.execution.recursion_limit
+            if self.role_config and self.role_config.execution and self.role_config.execution.recursion_limit
+            else new_config.agent.execution.recursion_limit
+        )
+        
         self.compression_config = new_config.agent.message_compression
         self.logging_config = new_config.agent.logging
         

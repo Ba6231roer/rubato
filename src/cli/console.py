@@ -4,7 +4,7 @@ from ..core.agent import RubatoAgent
 from ..skills.loader import SkillLoader
 from ..mcp.client import MCPManager
 from ..config.models import AppConfig
-from .commands import CommandHandler
+from ..commands import CommandDispatcher, CommandContext
 
 
 class Console:
@@ -25,13 +25,16 @@ class Console:
         self.mcp_manager = mcp_manager
         self.config = config
         self.app_state = app_state
-        self.command_handler = CommandHandler(
-            agent, 
-            skill_loader, 
-            mcp_manager,
-            role_manager,
-            config_loader
+        
+        context = CommandContext(
+            agent=agent,
+            skill_loader=skill_loader,
+            mcp_manager=mcp_manager,
+            role_manager=role_manager,
+            config_loader=config_loader,
+            config=config
         )
+        self.dispatcher = CommandDispatcher(context)
     
     def _print_banner(self) -> None:
         """打印欢迎横幅"""
@@ -71,7 +74,7 @@ class Console:
         """运行控制台"""
         self._print_banner()
         
-        while self.command_handler.is_running():
+        while self.dispatcher.is_running():
             try:
                 self._print_prompt()
                 user_input = input().strip()
@@ -79,9 +82,9 @@ class Console:
                 if not user_input:
                     continue
                 
-                cmd_result = await self.command_handler.handle_async(user_input)
-                if cmd_result is not None:
-                    print(cmd_result)
+                result = await self.dispatcher.dispatch(user_input)
+                if result is not None:
+                    print(result.to_text())
                     continue
                 
                 print("\n[Agent思考中...]")

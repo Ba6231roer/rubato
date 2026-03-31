@@ -4,6 +4,12 @@ import json
 import asyncio
 
 from .schemas import WSMessage
+from ..commands import CommandDispatcher, CommandContext
+from ..commands import (
+    HelpCommand, QuitCommand, ConfigCommand, RoleCommand,
+    SkillCommand, ToolCommand, BrowserCommand, HistoryCommand,
+    ClearCommand, NewCommand, ReloadCommand, PromptCommand
+)
 
 websocket_router = APIRouter()
 
@@ -30,6 +36,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 _app_state = None
+_dispatcher: CommandDispatcher = None
 
 
 def set_app_state(state):
@@ -39,6 +46,15 @@ def set_app_state(state):
 
 def get_app_state():
     return _app_state
+
+
+def init_command_dispatcher(context: CommandContext):
+    global _dispatcher
+    _dispatcher = CommandDispatcher(context)
+
+
+def get_dispatcher() -> CommandDispatcher:
+    return _dispatcher
 
 
 @websocket_router.websocket("/ws")
@@ -75,14 +91,53 @@ async def handle_message(websocket: WebSocket, message: dict):
     msg_type = message.get("type")
     content = message.get("content", "")
     
-    if msg_type == "task":
-        await handle_task(websocket, content)
+    if msg_type == "command":
+        await handle_command(websocket, content)
+    elif msg_type == "task":
+        result = await try_dispatch_command(content)
+        if result:
+            await manager.send_message(websocket, {
+                "type": "command_result",
+                "content": result.to_dict()
+            })
+        else:
+            await handle_task(websocket, content)
     elif msg_type == "ping":
         await manager.send_message(websocket, {"type": "pong", "content": ""})
     else:
         await manager.send_message(websocket, {
             "type": "error",
             "content": f"未知消息类型: {msg_type}"
+        })
+
+
+async def try_dispatch_command(user_input: str):
+    """尝试将用户输入作为命令处理"""
+    if _dispatcher and user_input.strip().startswith('/'):
+        return await _dispatcher.dispatch(user_input)
+    return None
+
+
+async def handle_command(websocket: WebSocket, command: str):
+    """处理命令消息"""
+    if not _dispatcher:
+        await manager.send_message(websocket, {
+            "type": "error",
+            "content": "命令分发器未初始化"
+        })
+        return
+    
+    result = await _dispatcher.dispatch(command)
+    
+    if result is None:
+        await manager.send_message(websocket, {
+            "type": "error",
+            "content": "无效的命令格式。命令必须以 '/' 开头"
+        })
+    else:
+        await manager.send_message(websocket, {
+            "type": "command_result",
+            "content": result.to_dict()
         })
 
 
