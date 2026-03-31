@@ -342,6 +342,14 @@ class RubatoAgent:
                 config={"recursion_limit": self.recursion_limit}
             ):
                 step_count += 1
+                
+                if event is None:
+                    self.logger.log_agent_action("event_none", {
+                        "step": step_count,
+                        "warning": "Received None event from astream"
+                    })
+                    continue
+                
                 self.logger.log_agent_action("stream_event", {
                     "step": step_count,
                     "event_keys": list(event.keys())
@@ -381,7 +389,13 @@ class RubatoAgent:
             return final_content if final_content else "任务已完成"
             
         except Exception as e:
+            import traceback
             self.logger.log_error("agent_invoke", e)
+            self.logger.log_agent_action("agent_invoke_error_details", {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "traceback": traceback.format_exc()
+            })
             raise
     
     async def run_stream(self, user_input: str):
@@ -421,6 +435,13 @@ class RubatoAgent:
             ):
                 step_count += 1
                 
+                if event is None:
+                    self.logger.log_agent_action("event_none", {
+                        "step": step_count,
+                        "warning": "Received None event from astream"
+                    })
+                    continue
+                
                 for node_name, node_output in event.items():
                     if "messages" in node_output:
                         for msg in node_output["messages"]:
@@ -452,7 +473,13 @@ class RubatoAgent:
                 yield "任务已完成"
             
         except Exception as e:
+            import traceback
             self.logger.log_error("agent_invoke", e)
+            self.logger.log_agent_action("agent_invoke_error_details", {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "traceback": traceback.format_exc()
+            })
             yield f"执行错误: {str(e)}"
     
     async def _inject_skill(self, skill_name: str) -> str:

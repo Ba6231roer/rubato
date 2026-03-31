@@ -24,8 +24,11 @@ Rubato is a natural language-driven automated test execution framework. Users si
 - **Autonomous Planning** - Agent autonomously reasons, plans, and executes based on prompts
 - **ReAct Pattern** - Universal Reason → Act → Observe loop
 - **Multi-Agent Collaboration** - Supports main agent calling sub-agents with independent system prompts and contexts
+- **Role System** - Supports multi-role configuration, each role can have independent system prompts, model configs, and tool sets
+- **Multi-Instance Parallel** - Supports multiple agent instances running in parallel for improved efficiency
 - **Dynamic Skill Loading** - Loads metadata at startup, full content on-demand during conversations
-- **Playwright CLI Integration** - Supports Playwright CLI for browser automation with high token efficiency
+- **Playwright CLI Integration** - Browser automation via ShellTool executing playwright-cli commands, high token efficiency
+- **Playwright MCP (Optional)** - Supports Playwright MCP as an alternative solution, disabled by default
 - **Context Compression** - Automatically manages conversation history to avoid token overflow
 - **Browser Persistence** - Browser runs as independent process, supporting state reuse and cross-session persistence
 - **Dual Mode Operation** - Supports both CLI command-line and Web UI interaction modes
@@ -52,6 +55,8 @@ pip install -r requirements.txt
 npm install -g @playwright/cli@latest
 playwright-cli --help
 ```
+
+> **Tip**: Playwright CLI is the recommended approach for browser automation. If you prefer to use Playwright MCP as an alternative, enable it in `config/mcp_config.yaml`.
 
 ### 3. Configure API Key
 
@@ -178,6 +183,8 @@ rubato/
 │   ├── main.py            # Entry point (supports CLI/Web modes)
 │   ├── core/              # Core modules
 │   │   ├── agent.py       # Main agent
+│   │   ├── agent_pool.py  # Agent instance pool
+│   │   ├── role_manager.py # Role manager
 │   │   └── sub_agents.py  # Sub-agent mechanism
 │   ├── api/               # HTTP service layer
 │   │   ├── app.py         # FastAPI application
@@ -186,14 +193,23 @@ rubato/
 │   ├── web/               # Web UI
 │   │   ├── templates/     # HTML templates
 │   │   └── static/        # Static assets
+│   ├── commands/          # Command system
 │   ├── skills/            # Skill system
 │   ├── context/           # Context management
 │   ├── config/            # Configuration management
 │   └── cli/               # Command-line interface
 ├── config/                # Configuration files
+│   ├── model_config.yaml  # Model configuration
+│   ├── agent_config.yaml  # Agent configuration
+│   ├── mcp_config.yaml    # MCP configuration
+│   └── roles/             # Role configurations
 ├── prompts/               # Prompts
+│   └── roles/             # Role prompts
 ├── skills/                # Skill files
-│   └── playwright-cli/    # Playwright CLI Skill
+│   ├── playwright-cli/    # Playwright CLI Skill (recommended)
+│   │   ├── SKILL.md       # Main skill file
+│   │   └── references/    # Reference docs
+│   └── test-execution.md  # Test execution skill
 ├── sub_agents/            # Sub-agent configurations
 ├── logs/                  # Log directory
 └── tests/                 # Test files
@@ -208,10 +224,18 @@ rubato/
 | `/config` | Display current configuration |
 | `/history` | Display conversation history |
 | `/clear` | Clear conversation history |
+| `/new` | Start new conversation (keeps role and system prompt) |
+| `/reload` | Reload all configurations (model, role, Skill) |
 | `/skill list` | List all available Skills |
 | `/skill show <name>` | Show Skill details |
 | `/tool list` | List all available tools |
 | `/prompt show` | Display current system prompt |
+| `/role <name>` | Switch to specified role |
+| `/role list` | List all available roles |
+| `/role show <name>` | Show role details |
+| `/browser status` | View browser status (requires MCP) |
+| `/browser close` | Close browser (requires MCP) |
+| `/browser reopen` | Reopen browser (requires MCP) |
 
 ## Extensibility
 
@@ -263,7 +287,8 @@ execution:
 - LangGraph 0.4.5
 - FastAPI 0.109+
 - Uvicorn 0.27+
-- Playwright CLI
+- Playwright CLI (Recommended)
+- Playwright MCP (Optional)
 - Pydantic
 
 ## Troubleshooting
@@ -285,6 +310,12 @@ playwright-cli --help
 ```bash
 npx playwright install chromium
 ```
+
+### Playwright MCP Connection Failed (if using MCP alternative)
+
+1. Check `enabled: true` in `config/mcp_config.yaml`
+2. Confirm Playwright MCP is correctly installed
+3. Check network connection
 
 ## Documentation
 
