@@ -21,6 +21,10 @@ from .models import (
     AgentExecutionConfig,
     AgentConfig,
     AppConfig,
+    ProjectConfig,
+    WorkspaceConfig,
+    FileToolsConfig,
+    PermissionMode,
 )
 from .loader import ConfigLoader
 from .role_loader import RoleConfigLoader
@@ -53,6 +57,10 @@ __all__ = [
     "AgentExecutionConfig",
     "AgentConfig",
     "AppConfig",
+    "ProjectConfig",
+    "WorkspaceConfig",
+    "FileToolsConfig",
+    "PermissionMode",
     "ConfigLoader",
     "RoleConfigLoader",
     "ConfigValidationError",

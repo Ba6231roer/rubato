@@ -1,5 +1,125 @@
 from pydantic import BaseModel, field_validator
 from typing import Optional, List, Dict, Any
+from pathlib import Path
+from enum import Enum
+
+
+class PermissionMode(str, Enum):
+    ask = "ask"
+    allow = "allow"
+    deny = "deny"
+
+
+class WorkspaceConfig(BaseModel):
+    main: Path
+    additional: List[Path] = []
+    excluded: List[str] = []
+
+    @field_validator('main')
+    @classmethod
+    def validate_main(cls, v):
+        if not v:
+            raise ValueError('main workspace path cannot be empty')
+        return v
+
+    @field_validator('additional')
+    @classmethod
+    def validate_additional(cls, v):
+        for path in v:
+            if not path:
+                raise ValueError('additional workspace paths cannot contain empty paths')
+        return v
+
+
+class ProjectConfig(BaseModel):
+    name: str
+    root: Path
+    workspace: WorkspaceConfig
+
+    @field_validator('name')
+    @classmethod
+    def validate_name(cls, v):
+        if not v or not v.strip():
+            raise ValueError('project name cannot be empty')
+        return v.strip()
+
+    @field_validator('root')
+    @classmethod
+    def validate_root(cls, v):
+        if not v:
+            raise ValueError('project root cannot be empty')
+        return v
+
+
+class FileToolsConfig(BaseModel):
+    enabled: bool = True
+    permission_mode: PermissionMode = PermissionMode.ask
+    custom_permissions: Dict[str, PermissionMode] = {}
+    default_permissions: PermissionMode = PermissionMode.ask
+    audit: bool = True
+
+    @field_validator('permission_mode', 'default_permissions', mode='before')
+    @classmethod
+    def validate_permission_mode(cls, v):
+        if isinstance(v, str):
+            try:
+                return PermissionMode(v)
+            except ValueError:
+                raise ValueError(f'permission_mode must be one of {[m.value for m in PermissionMode]}')
+        return v
+
+    @field_validator('custom_permissions', mode='before')
+    @classmethod
+    def validate_custom_permissions(cls, v):
+        if isinstance(v, dict):
+            validated = {}
+            for key, value in v.items():
+                if isinstance(value, str):
+                    try:
+                        validated[key] = PermissionMode(value)
+                    except ValueError:
+                        raise ValueError(f'custom_permissions[{key}] must be one of {[m.value for m in PermissionMode]}')
+                else:
+                    validated[key] = value
+            return validated
+        return v
+
+
+class WorkspaceRestrictionConfig(BaseModel):
+    allowed_subdirs: List[str] = []
+    excluded_patterns: List[str] = []
+    read_only_dirs: List[str] = []
+    
+    @field_validator('allowed_subdirs', 'excluded_patterns', 'read_only_dirs')
+    @classmethod
+    def validate_list(cls, v):
+        if not isinstance(v, list):
+            raise ValueError('must be a list')
+        return v
+
+
+class RoleFileToolsConfig(BaseModel):
+    enabled: bool = True
+    workspace: Optional[WorkspaceConfig] = None
+    workspace_restriction: Optional[WorkspaceRestrictionConfig] = None
+    permissions: Optional[Dict[str, Any]] = None
+    audit: bool = True
+    
+    @field_validator('permissions', mode='before')
+    @classmethod
+    def validate_permissions(cls, v):
+        if v is None:
+            return {
+                'default': PermissionMode.ask,
+                'custom': {}
+            }
+        if isinstance(v, dict):
+            if 'default' not in v:
+                v['default'] = PermissionMode.ask
+            if 'custom' not in v:
+                v['custom'] = {}
+            return v
+        return v
 
 
 class RoleModelConfig(BaseModel):
@@ -40,6 +160,7 @@ class RoleConfig(BaseModel):
     model: RoleModelConfig = RoleModelConfig()
     execution: RoleExecutionConfig = RoleExecutionConfig()
     available_tools: List[str] = []
+    file_tools: Optional[RoleFileToolsConfig] = None
     metadata: Optional[Dict[str, Any]] = None
 
     @field_validator('name')
@@ -234,6 +355,8 @@ class AppConfig(BaseModel):
     prompts: PromptConfig
     skills: SkillsConfig
     agent: AgentConfig = AgentConfig()
+    project: Optional[ProjectConfig] = None
+    file_tools: Optional[FileToolsConfig] = None
 
     @classmethod
     def migrate_old_config(cls, data: dict) -> dict:

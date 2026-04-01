@@ -1,0 +1,33 @@
+# 项目配置文件
+# 配置项目基本信息和工作空间设置
+
+project:
+  # 项目名称
+  name: "rubato"
+  
+  # 项目根目录
+  # 支持相对路径（相对于配置文件位置）或绝对路径
+  root: "."
+  
+  # 工作空间配置
+  # 定义 Agent 可以访问的文件范围
+  workspace:
+    # 主工作空间路径
+    # Agent 的所有文件操作都限制在此路径内
+    main: "C:\\DEV\\rubato\\test_case_path\\"
+    
+    # 附加工作空间列表（可选）
+    # 允许 Agent 访问主工作空间之外的其他目录
+    additional:
+      - "./src"
+      - "./config"
+    
+    # 排除的文件和目录模式（可选）
+    # 匹配这些模式的文件/目录将被禁止访问
+    excluded:
+      - "node_modules"
+      - ".git"
+      - "__pycache__"
+      - "*.pyc"
+      - ".venv"
+      - "venv"

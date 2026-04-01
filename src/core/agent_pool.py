@@ -7,13 +7,14 @@ from typing import Any, Dict, List, Optional, Callable
 from pathlib import Path
 import threading
 
-from ..config.models import AppConfig, RoleConfig
+from ..config.models import AppConfig, RoleConfig, ProjectConfig, FileToolsConfig
 from ..config.loader import ConfigLoader
 from ..context.manager import ContextManager
 from ..skills.loader import SkillLoader
 from ..mcp.tools import ToolRegistry
 from ..tools.provider import LocalToolProvider, ShellToolProvider
 from ..tools.mcp_provider import MCPToolProvider
+from ..tools.file_tools import FileToolProvider
 from .agent import RubatoAgent
 from .role_manager import RoleManager
 from .sub_agents import spawn_agent
@@ -160,7 +161,78 @@ class AgentPool:
             mcp_provider = MCPToolProvider(mcp_config, mcp_manager)
             registry.register_provider(mcp_provider)
         
+        if self._should_enable_file_tools(role_config):
+            file_tool_provider = self._create_file_tool_provider(role_config)
+            if file_tool_provider and file_tool_provider.is_available():
+                registry.register_provider(file_tool_provider)
+                self._logger.log_agent_action("file_tools_registered", {
+                    "tool_count": len(file_tool_provider.get_tools())
+                })
+        
         return registry
+    
+    def _should_enable_file_tools(self, role_config: Optional[RoleConfig] = None) -> bool:
+        if role_config and role_config.file_tools:
+            if hasattr(role_config.file_tools, 'enabled'):
+                return role_config.file_tools.enabled
+            return True
+        
+        if self.config.file_tools:
+            return self.config.file_tools.enabled
+        
+        return False
+    
+    def _create_file_tool_provider(
+        self,
+        role_config: Optional[RoleConfig] = None
+    ) -> Optional[FileToolProvider]:
+        project_config = self._get_project_config(role_config)
+        file_tools_config = self._get_file_tools_config(role_config)
+        
+        if not project_config or not file_tools_config:
+            return None
+        
+        try:
+            return FileToolProvider(project_config, file_tools_config)
+        except Exception as e:
+            self._logger.log_error("create_file_tool_provider", e)
+            return None
+    
+    def _get_project_config(self, role_config: Optional[RoleConfig] = None) -> Optional[ProjectConfig]:
+        if role_config and role_config.file_tools:
+            if hasattr(role_config.file_tools, 'workspace'):
+                from ..config.models import WorkspaceConfig
+                workspace_config = role_config.file_tools.workspace
+                if isinstance(workspace_config, WorkspaceConfig):
+                    return ProjectConfig(
+                        name=self.config.project.name if self.config.project else "default",
+                        root=self.config.project.root if self.config.project else Path.cwd(),
+                        workspace=workspace_config
+                    )
+        
+        if self.config.project:
+            return self.config.project
+        
+        return None
+    
+    def _get_file_tools_config(self, role_config: Optional[RoleConfig] = None) -> Optional[FileToolsConfig]:
+        if role_config and role_config.file_tools:
+            if hasattr(role_config.file_tools, 'permissions'):
+                from ..config.models import PermissionMode
+                permissions = role_config.file_tools.permissions or {}
+                return FileToolsConfig(
+                    enabled=True,
+                    permission_mode=permissions.get('default', PermissionMode.ask),
+                    custom_permissions=permissions.get('custom', {}),
+                    default_permissions=permissions.get('default', PermissionMode.ask),
+                    audit=getattr(role_config.file_tools, 'audit', True)
+                )
+            return self.config.file_tools if self.config.file_tools else FileToolsConfig()
+        
+        if self.config.file_tools:
+            return self.config.file_tools
+        
+        return None
 
     async def create_instance(
         self,

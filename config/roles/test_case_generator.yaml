@@ -17,6 +17,13 @@ execution:
 available_tools:
   - shell_tool
   - spawn_agent
+  - file_read
+  - file_write
+  - file_replace
+  - file_list
+  - file_search
+  - file_exists
+  - file_mkdir
 metadata:
   version: "1.0"
   author: "Rubato Team"

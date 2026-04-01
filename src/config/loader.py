@@ -6,7 +6,8 @@ from typing import Optional
 
 from .models import (
     AppConfig, FullModelConfig, MCPConfig, 
-    PromptConfig, SkillsConfig, ModelConfig, AgentConfig
+    PromptConfig, SkillsConfig, ModelConfig, AgentConfig,
+    ProjectConfig, FileToolsConfig
 )
 from .validators import (
     ConfigValidationError, validate_required_configs,
@@ -28,13 +29,17 @@ class ConfigLoader:
         prompt_config = self._load_prompt_config()
         skills_config = self._load_skills_config()
         agent_config = self._load_agent_config()
+        project_config = self._load_project_config()
+        file_tools_config = self._load_tools_config()
         
         return AppConfig(
             model=model_config,
             mcp=mcp_config,
             prompts=prompt_config,
             skills=skills_config,
-            agent=agent_config
+            agent=agent_config,
+            project=project_config,
+            file_tools=file_tools_config
         )
     
     def _load_yaml(self, filename: str) -> dict:
@@ -51,13 +56,21 @@ class ConfigLoader:
         return yaml.safe_load(content)
     
     def _replace_env_vars(self, content: str) -> str:
-        """替换环境变量"""
+        """替换环境变量，支持系统环境变量和特殊变量"""
         pattern = r'\$\{([^}]+)\}'
         
         def replacer(match):
             env_var = match.group(1)
-            value = os.getenv(env_var, "")
-            return value
+            
+            if env_var == 'PROJECT_ROOT':
+                return str(self.config_dir.parent.resolve())
+            elif env_var == 'HOME':
+                return str(Path.home())
+            elif env_var == 'CONFIG_DIR':
+                return str(self.config_dir.resolve())
+            else:
+                value = os.getenv(env_var, "")
+                return value
         
         return re.sub(pattern, replacer, content)
     
@@ -121,6 +134,64 @@ class ConfigLoader:
             return AgentConfig(**data.get('agent', {}))
         except ConfigValidationError:
             return AgentConfig()
+        except Exception as e:
+            if hasattr(e, 'errors'):
+                raise handle_pydantic_error(e)
+            raise
+    
+    def _load_project_config(self) -> Optional[ProjectConfig]:
+        """加载项目配置"""
+        try:
+            data = self._load_yaml("project_config.yaml")
+            project_data = data.get('project', {})
+            
+            if not project_data:
+                return None
+            
+            if 'root' in project_data:
+                root_path = project_data['root']
+                if not Path(root_path).is_absolute():
+                    project_data['root'] = str(
+                        (self.config_dir.parent / root_path).resolve()
+                    )
+            
+            if 'workspace' in project_data:
+                workspace_data = project_data['workspace']
+                project_root = Path(project_data.get('root', self.config_dir.parent))
+                
+                if 'main' in workspace_data:
+                    main_path = workspace_data['main']
+                    if not Path(main_path).is_absolute():
+                        workspace_data['main'] = str(
+                            (project_root / main_path).resolve()
+                        )
+                
+                if 'additional' in workspace_data:
+                    workspace_data['additional'] = [
+                        str((project_root / p).resolve()) if not Path(p).is_absolute() else p
+                        for p in workspace_data['additional']
+                    ]
+            
+            return ProjectConfig(**project_data)
+        except ConfigValidationError:
+            return None
+        except Exception as e:
+            if hasattr(e, 'errors'):
+                raise handle_pydantic_error(e)
+            raise
+    
+    def _load_tools_config(self) -> Optional[FileToolsConfig]:
+        """加载工具配置"""
+        try:
+            data = self._load_yaml("tools_config.yaml")
+            tools_data = data.get('file_tools', {})
+            
+            if not tools_data:
+                return None
+            
+            return FileToolsConfig(**tools_data)
+        except ConfigValidationError:
+            return None
         except Exception as e:
             if hasattr(e, 'errors'):
                 raise handle_pydantic_error(e)
