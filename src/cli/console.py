@@ -32,7 +32,8 @@ class Console:
             mcp_manager=mcp_manager,
             role_manager=role_manager,
             config_loader=config_loader,
-            config=config
+            config=config,
+            agent_pool=self.app_state.agent_pool if self.app_state else None
         )
         self.dispatcher = CommandDispatcher(context)
     

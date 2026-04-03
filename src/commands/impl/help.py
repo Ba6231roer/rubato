@@ -14,6 +14,12 @@ class HelpCommand(BaseCommand):
         help_text = registry.get_all_help()
         
         additional_help = """
+状态查看：
+  /status        - 显示当前状态概览
+  /status full   - 显示完整状态信息
+  /status tools  - 显示当前可用工具
+  /status prompt - 显示完整系统提示词
+
 角色管理：
   /role <name>   - 切换到指定角色
   /role list     - 列出所有可用角色

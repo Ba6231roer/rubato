@@ -7,7 +7,8 @@ from .dispatcher import CommandDispatcher
 from .impl import (
     HelpCommand, QuitCommand, ConfigCommand, RoleCommand,
     SkillCommand, ToolCommand, BrowserCommand, HistoryCommand,
-    ClearCommand, NewCommand, ReloadCommand, PromptCommand
+    ClearCommand, NewCommand, ReloadCommand, PromptCommand,
+    StatusCommand
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     'NewCommand',
     'ReloadCommand',
     'PromptCommand',
+    'StatusCommand',
 ]

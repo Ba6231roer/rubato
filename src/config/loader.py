@@ -7,11 +7,10 @@ from typing import Optional
 from .models import (
     AppConfig, FullModelConfig, MCPConfig, 
     PromptConfig, SkillsConfig, ModelConfig, AgentConfig,
-    ProjectConfig, FileToolsConfig
+    ProjectConfig, FileToolsConfig, UnifiedToolsConfig
 )
 from .validators import (
-    ConfigValidationError, validate_required_configs,
-    validate_api_key, handle_pydantic_error
+    ConfigValidationError, validate_api_key, handle_pydantic_error
 )
 
 
@@ -31,6 +30,7 @@ class ConfigLoader:
         agent_config = self._load_agent_config()
         project_config = self._load_project_config()
         file_tools_config = self._load_tools_config()
+        unified_tools_config = self._load_unified_tools_config()
         
         return AppConfig(
             model=model_config,
@@ -39,7 +39,8 @@ class ConfigLoader:
             skills=skills_config,
             agent=agent_config,
             project=project_config,
-            file_tools=file_tools_config
+            file_tools=file_tools_config,
+            tools=unified_tools_config
         )
     
     def _load_yaml(self, filename: str) -> dict:
@@ -190,6 +191,23 @@ class ConfigLoader:
                 return None
             
             return FileToolsConfig(**tools_data)
+        except ConfigValidationError:
+            return None
+        except Exception as e:
+            if hasattr(e, 'errors'):
+                raise handle_pydantic_error(e)
+            raise
+    
+    def _load_unified_tools_config(self) -> Optional[UnifiedToolsConfig]:
+        """加载统一工具配置"""
+        try:
+            data = self._load_yaml("tools_config.yaml")
+            tools_data = data.get('tools', {})
+            
+            if not tools_data:
+                return None
+            
+            return UnifiedToolsConfig(**tools_data)
         except ConfigValidationError:
             return None
         except Exception as e:

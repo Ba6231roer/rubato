@@ -8,6 +8,7 @@ if TYPE_CHECKING:
     from ..mcp.client import MCPManager
     from ..config.loader import ConfigLoader
     from ..config.models import AppConfig
+    from ..core.agent_pool import AgentPool
 
 
 @dataclass
@@ -18,6 +19,7 @@ class CommandContext:
     role_manager: Optional['RoleManager'] = None
     config_loader: Optional['ConfigLoader'] = None
     config: Optional['AppConfig'] = None
+    agent_pool: Optional['AgentPool'] = None
     session_id: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
     

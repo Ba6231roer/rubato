@@ -497,7 +497,16 @@ async def run_web_mode(port: int = 8000) -> None:
         sys.exit(1)
     
     print("正在加载Skills...")
-    skill_loader = SkillLoader(config.skills.directory)
+    enabled_skills = config.skills.enabled_skills if config.skills else None
+    max_loaded_skills = 3
+    if config.skills and config.skills.skill_loading:
+        max_loaded_skills = config.skills.skill_loading.max_loaded_skills
+    
+    skill_loader = SkillLoader(
+        skills_dir=config.skills.directory,
+        enabled_skills=enabled_skills,
+        max_loaded_skills=max_loaded_skills
+    )
     await skill_loader.load_skill_metadata()
     
     print("正在初始化上下文管理器...")
@@ -545,7 +554,8 @@ async def run_web_mode(port: int = 8000) -> None:
         mcp_manager=mcp_manager,
         role_manager=app_state.role_manager,
         config_loader=config_loader,
-        config=config
+        config=config,
+        agent_pool=app_state.agent_pool
     )
     init_ws_dispatcher(command_context)
     init_http_dispatcher(command_context)
@@ -600,7 +610,16 @@ async def main_async() -> None:
         sys.exit(1)
     
     print("正在加载Skills...")
-    skill_loader = SkillLoader(config.skills.directory)
+    enabled_skills = config.skills.enabled_skills if config.skills else None
+    max_loaded_skills = 3
+    if config.skills and config.skills.skill_loading:
+        max_loaded_skills = config.skills.skill_loading.max_loaded_skills
+    
+    skill_loader = SkillLoader(
+        skills_dir=config.skills.directory,
+        enabled_skills=enabled_skills,
+        max_loaded_skills=max_loaded_skills
+    )
     await skill_loader.load_skill_metadata()
     
     print("正在初始化上下文管理器...")

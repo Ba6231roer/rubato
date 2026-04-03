@@ -1,6 +1,7 @@
 from typing import Dict, Callable, Optional, Awaitable
 from ..core.agent import RubatoAgent
 from ..core.role_manager import RoleManager
+from ..core.agent_pool import AgentPool
 from ..skills.loader import SkillLoader
 from ..mcp.client import MCPManager
 from ..config.loader import ConfigLoader
@@ -17,13 +18,15 @@ class CommandHandler:
         skill_loader: SkillLoader,
         mcp_manager: Optional[MCPManager] = None,
         role_manager: Optional[RoleManager] = None,
-        config_loader: Optional[ConfigLoader] = None
+        config_loader: Optional[ConfigLoader] = None,
+        agent_pool: Optional[AgentPool] = None
     ):
         self.agent = agent
         self.skill_loader = skill_loader
         self.mcp_manager = mcp_manager
         self.role_manager = role_manager
         self.config_loader = config_loader
+        self.agent_pool = agent_pool
         self.commands: Dict[str, Callable] = {
             'help': self._cmd_help,
             'quit': self._cmd_quit,
@@ -38,6 +41,7 @@ class CommandHandler:
             'role': self._cmd_role,
             'new': self._cmd_new,
             'reload': self._cmd_reload,
+            'status': self._cmd_status,
         }
         self._running = True
     
@@ -100,6 +104,12 @@ class CommandHandler:
   /clear         - 清空对话历史
   /new           - 开始新对话（清空上下文，保留角色和系统提示词）
   /reload        - 重新加载所有配置（模型、角色、Skill）
+
+状态查看：
+  /status        - 显示当前状态概览
+  /status full   - 显示完整状态信息
+  /status tools  - 显示当前可用工具
+  /status prompt - 显示完整系统提示词
 
 角色管理：
   /role <name>   - 切换到指定角色
@@ -347,14 +357,26 @@ Skill管理：
             
             self.agent.context_manager.clear()
             
-            new_prompt = self.role_manager.load_system_prompt(name)
-            self.agent.system_prompt = new_prompt
-            self.agent._current_system_prompt = new_prompt
-            self.agent.agent = self.agent._create_agent(new_prompt)
+            if self.agent_pool:
+                new_tool_registry = self.agent_pool._create_tool_registry(
+                    mcp_manager=getattr(self.agent, '_mcp_manager', None),
+                    role_config=role
+                )
+                self.agent.role_config = role
+                self.agent.reload_tools(new_tool_registry)
+            
+            self.agent.reload_system_prompt(role)
             
             merged_model = self.role_manager.get_merged_model_config(name)
             if merged_model:
-                self.agent.llm = self.agent._create_llm()
+                self.agent.llm = self.agent._create_llm(merged_model)
+                self.agent.logger.log_agent_action("model_config_updated", {
+                    "role_name": name,
+                    "model_name": merged_model.name,
+                    "provider": merged_model.provider,
+                    "temperature": merged_model.temperature,
+                    "max_tokens": merged_model.max_tokens
+                })
             
             return f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。"
             
@@ -370,10 +392,7 @@ Skill管理：
             
             current_role = self.role_manager.get_current_role() if self.role_manager else None
             if current_role:
-                system_prompt = self.role_manager.load_system_prompt(current_role.name)
-                self.agent.system_prompt = system_prompt
-                self.agent._current_system_prompt = system_prompt
-                self.agent.agent = self.agent._create_agent(system_prompt)
+                self.agent.reload_system_prompt(current_role)
             
             return "新对话已开始。当前角色和系统提示词已保留，浏览器状态保持不变。"
             
@@ -404,3 +423,74 @@ Skill管理：
             
         except Exception as e:
             return f"重新加载配置时发生错误：{str(e)}"
+    
+    def _cmd_status(self, args: str) -> str:
+        """状态查看命令"""
+        parts = args.split(maxsplit=1)
+        sub_cmd = parts[0].lower() if parts else ""
+        
+        if sub_cmd == "full":
+            return self._status_full()
+        elif sub_cmd == "tools":
+            return self._status_tools()
+        elif sub_cmd == "prompt":
+            return self._status_prompt()
+        else:
+            return self._status_overview()
+    
+    def _status_overview(self) -> str:
+        """显示状态概览"""
+        current_role = self.role_manager.get_current_role() if self.role_manager else None
+        role_name = current_role.name if current_role else "未设置"
+        role_desc = current_role.description if current_role else ""
+        
+        tool_count = len(self.agent.tools)
+        
+        prompt = self.agent.get_current_system_prompt()
+        prompt_length = len(prompt)
+        
+        lines = [
+            "当前状态概览：",
+            "=" * 50,
+            f"角色: {role_name}",
+            f"描述: {role_desc}",
+            f"可用工具数量: {tool_count}",
+            f"系统提示词长度: {prompt_length} 字符",
+            "",
+            "提示：使用 /status full 查看完整系统提示词",
+            "      使用 /status tools 查看工具列表"
+        ]
+        return "\n".join(lines)
+    
+    def _status_full(self) -> str:
+        """显示完整状态信息"""
+        lines = [
+            self._status_overview(),
+            "\n" + "=" * 50,
+            "\n系统提示词（含工具说明）：",
+            self._status_prompt()
+        ]
+        return "\n".join(lines)
+    
+    def _status_tools(self) -> str:
+        """显示工具详情"""
+        tools = self.agent.tools
+        if not tools:
+            return "没有可用的工具"
+        
+        lines = ["可用工具列表："]
+        for i, tool in enumerate(tools, 1):
+            desc = tool.description[:100] + "..." if len(tool.description) > 100 else tool.description
+            lines.append(f"  {i}. {tool.name}")
+            lines.append(f"     描述: {desc}")
+        return "\n".join(lines)
+    
+    def _status_prompt(self) -> str:
+        """显示完整系统提示词"""
+        prompt = self.agent.get_current_system_prompt()
+        lines = [
+            "当前系统提示词（包含工具说明）：",
+            "=" * 50,
+            prompt
+        ]
+        return "\n".join(lines)

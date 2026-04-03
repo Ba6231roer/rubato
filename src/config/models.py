@@ -153,6 +153,26 @@ class RoleExecutionConfig(BaseModel):
         return v
 
 
+class RoleToolsConfig(BaseModel):
+    """角色工具配置"""
+    builtin: Optional[Dict[str, Any]] = None
+    mcp: Optional[Dict[str, Any]] = None
+    skills: Optional[List[str]] = None
+
+    @field_validator('builtin', mode='before')
+    @classmethod
+    def validate_builtin(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, dict):
+            return v
+        if isinstance(v, bool):
+            return {'enabled': v}
+        if isinstance(v, list):
+            return {'enabled': True, 'tools': v}
+        return v
+
+
 class RoleConfig(BaseModel):
     name: str
     description: str
@@ -161,6 +181,7 @@ class RoleConfig(BaseModel):
     execution: RoleExecutionConfig = RoleExecutionConfig()
     available_tools: List[str] = []
     file_tools: Optional[RoleFileToolsConfig] = None
+    tools: Optional[RoleToolsConfig] = None
     metadata: Optional[Dict[str, Any]] = None
 
     @field_validator('name')
@@ -349,6 +370,90 @@ class AgentConfig(BaseModel):
         return v
 
 
+class FileToolsSubConfig(BaseModel):
+    """文件工具子配置（用于统一工具配置）"""
+    enabled: bool = True
+    permission_mode: PermissionMode = PermissionMode.ask
+    workspace: Optional[WorkspaceConfig] = None
+    permissions: Dict[str, PermissionMode] = {}
+    audit: bool = True
+
+    @field_validator('permission_mode', mode='before')
+    @classmethod
+    def validate_permission_mode(cls, v):
+        if isinstance(v, str):
+            try:
+                return PermissionMode(v)
+            except ValueError:
+                raise ValueError(f'permission_mode must be one of {[m.value for m in PermissionMode]}')
+        return v
+
+    @field_validator('permissions', mode='before')
+    @classmethod
+    def validate_permissions(cls, v):
+        if isinstance(v, dict):
+            validated = {}
+            for key, value in v.items():
+                if isinstance(value, str):
+                    try:
+                        validated[key] = PermissionMode(value)
+                    except ValueError:
+                        raise ValueError(f'permissions[{key}] must be one of {[m.value for m in PermissionMode]}')
+                else:
+                    validated[key] = value
+            return validated
+        return v
+
+
+class ShellToolConfig(BaseModel):
+    """Shell工具配置"""
+    enabled: bool = True
+    safe_mode: bool = True
+    allowed_commands: List[str] = []
+
+
+class SpawnAgentConfig(BaseModel):
+    """spawn_agent工具配置"""
+    enabled: bool = True
+
+
+class BuiltinToolsConfig(BaseModel):
+    """系统内置工具配置（包含spawn_agent, shell_tool, file_tools）"""
+    enabled: bool = True
+    spawn_agent: SpawnAgentConfig = SpawnAgentConfig()
+    shell_tool: ShellToolConfig = ShellToolConfig()
+    file_tools: FileToolsSubConfig = FileToolsSubConfig()
+
+
+class MCPToolsConfig(BaseModel):
+    """MCP工具配置"""
+    config_file: str = "mcp_config.yaml"
+    auto_connect: bool = True
+    cache_ttl: int = 300
+
+
+class SkillsToolsConfig(BaseModel):
+    """Skill配置"""
+    config_file: str = "skills_config.yaml"
+    auto_load_metadata: bool = True
+
+
+class ToolDocsConfig(BaseModel):
+    """工具说明文档配置"""
+    auto_inject: bool = True
+    inject_position: str = "after_prompt"
+    format: str = "markdown"
+    include_examples: bool = True
+
+
+class UnifiedToolsConfig(BaseModel):
+    """统一工具配置"""
+    builtin: BuiltinToolsConfig = BuiltinToolsConfig()
+    mcp: MCPToolsConfig = MCPToolsConfig()
+    skills: SkillsToolsConfig = SkillsToolsConfig()
+    tool_docs: ToolDocsConfig = ToolDocsConfig()
+
+
 class AppConfig(BaseModel):
     model: FullModelConfig
     mcp: Optional[MCPConfig] = None
@@ -357,6 +462,7 @@ class AppConfig(BaseModel):
     agent: AgentConfig = AgentConfig()
     project: Optional[ProjectConfig] = None
     file_tools: Optional[FileToolsConfig] = None
+    tools: Optional[UnifiedToolsConfig] = None
 
     @classmethod
     def migrate_old_config(cls, data: dict) -> dict:

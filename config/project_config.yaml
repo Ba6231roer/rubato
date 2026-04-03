@@ -14,7 +14,7 @@ project:
   workspace:
     # 主工作空间路径
     # Agent 的所有文件操作都限制在此路径内
-    main: "C:\\DEV\\rubato\\test_case_path\\"
+    main: "."
     
     # 附加工作空间列表（可选）
     # 允许 Agent 访问主工作空间之外的其他目录

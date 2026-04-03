@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Callable
 from pathlib import Path
 import threading
 
-from ..config.models import AppConfig, RoleConfig, ProjectConfig, FileToolsConfig
+from ..config.models import AppConfig, RoleConfig, ProjectConfig, FileToolsConfig, UnifiedToolsConfig
 from ..config.loader import ConfigLoader
 from ..context.manager import ContextManager
 from ..skills.loader import SkillLoader
@@ -16,8 +16,7 @@ from ..tools.provider import LocalToolProvider, ShellToolProvider
 from ..tools.mcp_provider import MCPToolProvider
 from ..tools.file_tools import FileToolProvider
 from .agent import RubatoAgent
-from .role_manager import RoleManager
-from .sub_agents import spawn_agent
+from .role_manager import RoleManager, DEFAULT_ROLE_NAME
 from ..utils.logger import get_llm_logger
 
 
@@ -122,6 +121,13 @@ class AgentPool:
             default_model_config=self.config.model
         )
         self._role_manager.load_roles()
+        
+        if self._role_manager.has_role(DEFAULT_ROLE_NAME):
+            self.default_role_name = DEFAULT_ROLE_NAME
+            self._logger.log_agent_action("default_role_set", {
+                "default_role_name": DEFAULT_ROLE_NAME
+            })
+        
         self._initialized = True
 
         self._logger.log_agent_action("agent_pool_initialized", {
@@ -141,7 +147,19 @@ class AgentPool:
         )
 
     def _create_skill_loader(self) -> SkillLoader:
-        return SkillLoader(self.skills_dir)
+        enabled_skills = None
+        max_loaded_skills = 3
+        
+        if self.config.skills:
+            enabled_skills = self.config.skills.enabled_skills
+            if self.config.skills.skill_loading:
+                max_loaded_skills = self.config.skills.skill_loading.max_loaded_skills
+        
+        return SkillLoader(
+            skills_dir=self.skills_dir,
+            enabled_skills=enabled_skills,
+            max_loaded_skills=max_loaded_skills
+        )
 
     def _create_tool_registry(
         self,
@@ -149,29 +167,109 @@ class AgentPool:
         role_config: Optional[RoleConfig] = None
     ) -> ToolRegistry:
         registry = ToolRegistry()
+        tools_summary = {"builtin": [], "mcp": [], "file_tools": []}
         
-        local_provider = LocalToolProvider([spawn_agent])
-        registry.register_provider(local_provider)
+        unified_config = self._get_unified_tools_config(role_config)
         
-        shell_provider = ShellToolProvider()
-        registry.register_provider(shell_provider)
+        if unified_config and unified_config.builtin.enabled:
+            if unified_config.builtin.shell_tool.enabled:
+                shell_provider = ShellToolProvider()
+                registry.register_provider(shell_provider)
+                tools_summary["builtin"].append("shell_tool")
+        else:
+            shell_provider = ShellToolProvider()
+            registry.register_provider(shell_provider)
+            tools_summary["builtin"].append("shell_tool")
         
         if mcp_manager is not None:
             mcp_config = self.config.mcp.model_dump() if self.config.mcp else {}
             mcp_provider = MCPToolProvider(mcp_config, mcp_manager)
             registry.register_provider(mcp_provider)
+            tools_summary["mcp"] = ["mcp_tools"]
         
-        if self._should_enable_file_tools(role_config):
-            file_tool_provider = self._create_file_tool_provider(role_config)
+        if self._should_enable_file_tools(role_config, unified_config):
+            file_tool_provider = self._create_file_tool_provider(role_config, unified_config)
             if file_tool_provider and file_tool_provider.is_available():
                 registry.register_provider(file_tool_provider)
-                self._logger.log_agent_action("file_tools_registered", {
-                    "tool_count": len(file_tool_provider.get_tools())
-                })
+                tools_summary["file_tools"] = [t.name for t in file_tool_provider.get_tools()]
+        
+        self._log_tool_summary(tools_summary)
         
         return registry
     
-    def _should_enable_file_tools(self, role_config: Optional[RoleConfig] = None) -> bool:
+    def _get_unified_tools_config(self, role_config: Optional[RoleConfig] = None) -> Optional[UnifiedToolsConfig]:
+        if role_config and role_config.tools:
+            return self._convert_role_tools_to_unified(role_config.tools)
+        
+        if self.config.tools:
+            return self.config.tools
+        
+        return None
+    
+    def _convert_role_tools_to_unified(self, role_tools) -> Optional[UnifiedToolsConfig]:
+        from ..config.models import (
+            UnifiedToolsConfig, BuiltinToolsConfig, MCPToolsConfig, 
+            SkillsToolsConfig, ToolDocsConfig, FileToolsSubConfig,
+            SpawnAgentConfig, ShellToolConfig
+        )
+        
+        builtin_config = BuiltinToolsConfig()
+        if role_tools.builtin:
+            builtin_data = role_tools.builtin
+            if isinstance(builtin_data, dict):
+                builtin_config = BuiltinToolsConfig(
+                    enabled=builtin_data.get('enabled', True),
+                    spawn_agent=SpawnAgentConfig(enabled=builtin_data.get('spawn_agent', True)),
+                    shell_tool=ShellToolConfig(enabled=builtin_data.get('shell_tool', True)),
+                    file_tools=FileToolsSubConfig(
+                        enabled=builtin_data.get('file_tools', {}).get('enabled', True)
+                    )
+                )
+        
+        mcp_config = MCPToolsConfig()
+        if role_tools.mcp:
+            mcp_data = role_tools.mcp
+            if isinstance(mcp_data, dict):
+                mcp_config = MCPToolsConfig(
+                    auto_connect=mcp_data.get('enabled', True)
+                )
+        
+        skills_list = role_tools.skills if role_tools.skills else []
+        
+        return UnifiedToolsConfig(
+            builtin=builtin_config,
+            mcp=mcp_config,
+            skills=SkillsToolsConfig(),
+            tool_docs=ToolDocsConfig()
+        )
+    
+    def _log_tool_summary(self, tools_summary: Dict[str, List[str]]) -> None:
+        total_tools = sum(len(tools) for tools in tools_summary.values())
+        summary_lines = [f"工具加载完成: {total_tools}个工具"]
+        
+        if tools_summary["builtin"]:
+            summary_lines.append(f"  - 内置工具: {', '.join(tools_summary['builtin'])}")
+        if tools_summary["file_tools"]:
+            summary_lines.append(f"  - 文件工具: {', '.join(tools_summary['file_tools'])}")
+        if tools_summary["mcp"]:
+            summary_lines.append(f"  - MCP工具: {', '.join(tools_summary['mcp'])}")
+        
+        self._logger.log_agent_action("tools_loaded", {
+            "summary": "\n".join(summary_lines),
+            "total": total_tools,
+            "builtin": tools_summary["builtin"],
+            "file_tools": tools_summary["file_tools"],
+            "mcp": tools_summary["mcp"]
+        })
+    
+    def _should_enable_file_tools(
+        self, 
+        role_config: Optional[RoleConfig] = None,
+        unified_config: Optional[UnifiedToolsConfig] = None
+    ) -> bool:
+        if unified_config and unified_config.builtin.file_tools.enabled:
+            return True
+        
         if role_config and role_config.file_tools:
             if hasattr(role_config.file_tools, 'enabled'):
                 return role_config.file_tools.enabled
@@ -184,10 +282,11 @@ class AgentPool:
     
     def _create_file_tool_provider(
         self,
-        role_config: Optional[RoleConfig] = None
+        role_config: Optional[RoleConfig] = None,
+        unified_config: Optional[UnifiedToolsConfig] = None
     ) -> Optional[FileToolProvider]:
         project_config = self._get_project_config(role_config)
-        file_tools_config = self._get_file_tools_config(role_config)
+        file_tools_config = self._get_file_tools_config(role_config, unified_config)
         
         if not project_config or not file_tools_config:
             return None
@@ -198,24 +297,23 @@ class AgentPool:
             self._logger.log_error("create_file_tool_provider", e)
             return None
     
-    def _get_project_config(self, role_config: Optional[RoleConfig] = None) -> Optional[ProjectConfig]:
-        if role_config and role_config.file_tools:
-            if hasattr(role_config.file_tools, 'workspace'):
-                from ..config.models import WorkspaceConfig
-                workspace_config = role_config.file_tools.workspace
-                if isinstance(workspace_config, WorkspaceConfig):
-                    return ProjectConfig(
-                        name=self.config.project.name if self.config.project else "default",
-                        root=self.config.project.root if self.config.project else Path.cwd(),
-                        workspace=workspace_config
-                    )
+    def _get_file_tools_config(
+        self, 
+        role_config: Optional[RoleConfig] = None,
+        unified_config: Optional[UnifiedToolsConfig] = None
+    ) -> Optional[FileToolsConfig]:
+        if unified_config and unified_config.builtin.file_tools:
+            ft_config = unified_config.builtin.file_tools
+            from ..config.models import PermissionMode
+            permissions = ft_config.permissions or {}
+            return FileToolsConfig(
+                enabled=ft_config.enabled,
+                permission_mode=ft_config.permission_mode,
+                custom_permissions=permissions,
+                default_permissions=ft_config.permission_mode,
+                audit=ft_config.audit
+            )
         
-        if self.config.project:
-            return self.config.project
-        
-        return None
-    
-    def _get_file_tools_config(self, role_config: Optional[RoleConfig] = None) -> Optional[FileToolsConfig]:
         if role_config and role_config.file_tools:
             if hasattr(role_config.file_tools, 'permissions'):
                 from ..config.models import PermissionMode
@@ -233,6 +331,23 @@ class AgentPool:
             return self.config.file_tools
         
         return None
+    
+    def _get_project_config(self, role_config: Optional[RoleConfig] = None) -> Optional[ProjectConfig]:
+        if role_config and role_config.file_tools:
+            if hasattr(role_config.file_tools, 'workspace'):
+                from ..config.models import WorkspaceConfig
+                workspace_config = role_config.file_tools.workspace
+                if isinstance(workspace_config, WorkspaceConfig):
+                    return ProjectConfig(
+                        name=self.config.project.name if self.config.project else "default",
+                        root=self.config.project.root if self.config.project else Path.cwd(),
+                        workspace=workspace_config
+                    )
+        
+        if self.config.project:
+            return self.config.project
+        
+        return None
 
     async def create_instance(
         self,
@@ -247,13 +362,20 @@ class AgentPool:
                 raise RuntimeError(f"已达到最大实例数限制: {self.max_instances}")
 
         effective_role_name = role_name or self.default_role_name
+        
+        if effective_role_name is None and self._role_manager:
+            if self._role_manager.has_role(DEFAULT_ROLE_NAME):
+                effective_role_name = DEFAULT_ROLE_NAME
+                self._logger.log_agent_action("role_fallback_to_default", {
+                    "requested_role": role_name,
+                    "default_role_name": DEFAULT_ROLE_NAME
+                })
+        
         role_config: Optional[RoleConfig] = None
-        system_prompt: Optional[str] = None
 
         if effective_role_name and self._role_manager:
             if self._role_manager.has_role(effective_role_name):
                 role_config = self._role_manager.get_role(effective_role_name)
-                system_prompt = self._role_manager.load_system_prompt(effective_role_name)
 
         context_manager = self._create_context_manager(role_config)
         skill_loader = self._create_skill_loader()
@@ -272,10 +394,6 @@ class AgentPool:
             role_config=role_config
         )
 
-        if system_prompt:
-            agent.system_prompt = system_prompt
-            agent._current_system_prompt = system_prompt
-
         inst_id = instance_id or str(uuid.uuid4())
         instance = AgentInstance(
             instance_id=inst_id,
@@ -292,6 +410,7 @@ class AgentPool:
         self._logger.log_agent_action("instance_created", {
             "instance_id": inst_id,
             "role_name": effective_role_name,
+            "requested_role": role_name,
             "total_instances": len(self._instances)
         })
 

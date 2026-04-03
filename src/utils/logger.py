@@ -58,9 +58,10 @@ class LLMRequestCallbackHandler(BaseCallbackHandler):
 class LLMLogger:
     """LLM请求/响应日志记录器"""
     
-    def __init__(self, log_dir: str = "logs"):
+    def __init__(self, log_dir: str = "logs", tool_log_mode: str = "summary"):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.tool_log_mode = tool_log_mode
         
         self._setup_loggers()
     
@@ -83,6 +84,59 @@ class LLMLogger:
             self.log_dir / "agent.log",
             "%(asctime)s | %(levelname)s | %(message)s"
         )
+    
+    def set_tool_log_mode(self, mode: str) -> None:
+        """设置工具日志模式
+        
+        Args:
+            mode: "summary"（摘要模式）或 "detailed"（详细模式）
+        """
+        self.tool_log_mode = mode
+    
+    def _format_tools_summary(self, tools: list) -> str:
+        """格式化工具列表摘要
+        
+        Args:
+            tools: 工具列表
+            
+        Returns:
+            摘要字符串
+        """
+        if not tools:
+            return "无工具"
+        
+        builtin_tools = []
+        mcp_tools = []
+        other_tools = []
+        
+        builtin_names = {'spawn_agent', 'shell_tool', 'file_read', 'file_write', 
+                        'file_list', 'file_search', 'file_exists', 'file_mkdir', 
+                        'file_replace', 'file_delete'}
+        
+        for tool in tools:
+            if isinstance(tool, dict):
+                tool_name = tool.get('name', 'unknown')
+            elif hasattr(tool, 'name'):
+                tool_name = tool.name
+            else:
+                tool_name = str(tool)
+            
+            if tool_name in builtin_names:
+                builtin_tools.append(tool_name)
+            elif tool_name.startswith('browser_') or tool_name.startswith('mcp_'):
+                mcp_tools.append(tool_name)
+            else:
+                other_tools.append(tool_name)
+        
+        lines = [f"工具加载完成: {len(tools)}个工具"]
+        if builtin_tools:
+            lines.append(f"  - 内置工具: {', '.join(builtin_tools)}")
+        if mcp_tools:
+            lines.append(f"  - MCP工具: {', '.join(mcp_tools)}")
+        if other_tools:
+            lines.append(f"  - 其他工具: {', '.join(other_tools)}")
+        
+        return "\n".join(lines)
     
     def _create_logger(self, name: str, file_path: Path, format_str: str) -> logging.Logger:
         """创建日志记录器"""
@@ -115,7 +169,14 @@ class LLMLogger:
     
     def log_request_raw(self, request_body: dict, model: str):
         """记录LLM原始请求报文"""
-        self.llm_logger.debug(f"REQUEST_RAW: {json.dumps(request_body, ensure_ascii=False, indent=2)}")
+        if self.tool_log_mode == "summary" and "tools" in request_body:
+            tools = request_body.get("tools", [])
+            tools_summary = self._format_tools_summary(tools)
+            log_body = {k: v for k, v in request_body.items() if k != "tools"}
+            log_body["tools_summary"] = tools_summary
+            self.llm_logger.debug(f"REQUEST_RAW: {json.dumps(log_body, ensure_ascii=False, indent=2)}")
+        else:
+            self.llm_logger.debug(f"REQUEST_RAW: {json.dumps(request_body, ensure_ascii=False, indent=2)}")
     
     def log_response(self, response: Any, model: str):
         """记录LLM响应"""

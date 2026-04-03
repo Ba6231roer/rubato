@@ -10,8 +10,9 @@ from ..config.models import AppConfig, RoleConfig
 from ..mcp.tools import ToolRegistry
 from ..skills.loader import SkillLoader
 from ..context.manager import ContextManager
-from .sub_agents import spawn_agent, init_sub_agent_manager
+from .sub_agents import SubAgentManager, create_spawn_agent_tool
 from ..utils.logger import get_llm_logger
+from ..tools.docs import generate_tool_docs_for_prompt
 
 
 def _content_to_str(content) -> str:
@@ -152,8 +153,7 @@ class RubatoAgent:
         self.logger = get_llm_logger()
         
         self.llm = self._create_llm()
-        self.system_prompt = self._load_system_prompt()
-        self._current_system_prompt = self.system_prompt
+        self._current_system_prompt = self._load_system_prompt()
         
         self.max_context_tokens = (
             role_config.execution.max_context_tokens
@@ -176,11 +176,23 @@ class RubatoAgent:
             else config.agent.execution.sub_agent_recursion_limit
         )
         
-        init_sub_agent_manager(self.llm, "sub_agents", sub_agent_recursion_limit)
+        self._role_skills: Optional[List[str]] = None
+        if role_config and role_config.tools and role_config.tools.skills:
+            self._role_skills = role_config.tools.skills
         
         self.tools = self._get_tools_for_role()
         
-        self.agent = self._create_agent(self.system_prompt)
+        self._sub_agent_manager = SubAgentManager(
+            llm=self.llm,
+            parent_agent=self,
+            sub_agents_dir="sub_agents",
+            recursion_limit=sub_agent_recursion_limit
+        )
+        
+        spawn_agent_tool = create_spawn_agent_tool(self._sub_agent_manager)
+        self.tools.append(spawn_agent_tool)
+        
+        self.agent = self._create_agent(self._current_system_prompt)
         
         self.logger.log_agent_action("agent_initialized", {
             "model": config.model.model.name,
@@ -226,17 +238,26 @@ class RubatoAgent:
             pre_model_hook=pre_model_hook
         )
     
-    def _create_llm(self):
-        """创建LLM实例"""
-        model_config = self.config.model.model
+    def _create_llm(self, model_config: Optional['ModelConfig'] = None):
+        """创建LLM实例
+        
+        Args:
+            model_config: 可选的模型配置，如果提供则使用该配置，否则使用默认配置
+            
+        Returns:
+            ChatOpenAI: LLM实例
+        """
+        from ..config.models import ModelConfig
+        
+        config = model_config if model_config is not None else self.config.model.model
 
         llm_kwargs = {
-            "model": model_config.name,
-            "api_key": model_config.api_key,
-            "base_url": model_config.base_url,
-            "temperature": model_config.temperature,
-            "max_tokens": model_config.max_tokens,
-            "default_headers": {"Authorization": model_config.auth} if model_config.auth else None,
+            "model": config.name,
+            "api_key": config.api_key,
+            "base_url": config.base_url,
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+            "default_headers": {"Authorization": config.auth} if config.auth else None,
             "callbacks": [self.logger.get_callback_handler()]
         }
         
@@ -270,13 +291,80 @@ class RubatoAgent:
     
     def _load_system_prompt(self) -> str:
         """加载系统提示词"""
-        prompt_file = self.config.prompts.system_prompt_file
+        if self.role_config and self.role_config.system_prompt_file:
+            prompt_file = self.role_config.system_prompt_file
+        else:
+            prompt_file = self.config.prompts.system_prompt_file
         
         try:
             with open(prompt_file, "r", encoding="utf-8") as f:
-                return f.read()
+                base_prompt = f.read()
         except FileNotFoundError:
-            return self._get_default_system_prompt()
+            base_prompt = self._get_default_system_prompt()
+        
+        if self._should_inject_tool_docs():
+            tool_docs = self._generate_tool_docs()
+            if tool_docs:
+                return f"{base_prompt}\n\n{tool_docs}"
+        
+        return base_prompt
+    
+    def _should_inject_tool_docs(self) -> bool:
+        """检查是否应该注入工具说明"""
+        if self.config.tools and hasattr(self.config.tools, 'tool_docs'):
+            return self.config.tools.tool_docs.auto_inject
+        return True
+    
+    def _generate_tool_docs(self) -> str:
+        """生成工具说明文档"""
+        builtin_tools = []
+        all_tools = self.tool_registry.get_all_tools()
+        for tool in all_tools:
+            tool_name = tool.name
+            builtin_names = {'spawn_agent', 'shell_tool', 'file_read', 'file_write', 
+                            'file_list', 'file_search', 'file_exists', 'file_mkdir', 
+                            'file_replace', 'file_delete'}
+            if tool_name in builtin_names:
+                builtin_tools.append(tool_name)
+        
+        mcp_tools = []
+        if self.mcp_manager and self.mcp_manager.is_connected:
+            try:
+                mcp_tools_list = self.mcp_manager.get_tools()
+                for tool in mcp_tools_list:
+                    mcp_tools.append({
+                        "name": tool.name if hasattr(tool, 'name') else str(tool),
+                        "description": tool.description if hasattr(tool, 'description') else "",
+                        "parameters": []
+                    })
+            except Exception:
+                pass
+        
+        skills = []
+        if self.skill_loader:
+            try:
+                skill_metadata = self.skill_loader.get_all_skill_metadata()
+                for name, meta in skill_metadata.items():
+                    if self._role_skills is None or name in self._role_skills:
+                        skills.append({
+                            "name": name,
+                            "description": meta.get("description", ""),
+                            "triggers": meta.get("triggers", []),
+                            "required_tools": meta.get("required_tools", [])
+                        })
+            except Exception:
+                pass
+        
+        include_examples = True
+        if self.config.tools and hasattr(self.config.tools, 'tool_docs'):
+            include_examples = self.config.tools.tool_docs.include_examples
+        
+        return generate_tool_docs_for_prompt(
+            builtin_tools=builtin_tools,
+            mcp_tools=mcp_tools,
+            skills=skills,
+            include_examples=include_examples
+        )
     
     def _get_default_system_prompt(self) -> str:
         """获取默认系统提示词"""
@@ -486,15 +574,115 @@ class RubatoAgent:
         """将Skill内容注入到提示词中"""
         skill_content = await self.skill_loader.load_full_skill(skill_name)
         
-        return f"{self.system_prompt}\n\n# 当前加载的Skill\n\n## {skill_name}\n\n{skill_content}\n\n---\n请根据这个Skill的指导，处理用户的请求。"
+        return f"{self._current_system_prompt}\n\n# 当前加载的Skill\n\n## {skill_name}\n\n{skill_content}\n\n---\n请根据这个Skill的指导，处理用户的请求。"
     
     def get_system_prompt(self) -> str:
-        """获取当前系统提示词"""
-        return self.system_prompt
+        """获取当前系统提示词（包含工具说明）"""
+        return self._current_system_prompt
+    
+    def get_current_system_prompt(self) -> str:
+        """获取当前系统提示词（包含工具说明）"""
+        return self._current_system_prompt
     
     def get_loaded_skills(self) -> List[str]:
         """获取已加载的Skills"""
         return self.context_manager.get_loaded_skills()
+    
+    def reload_system_prompt(self, role_config: Optional[RoleConfig] = None) -> None:
+        """重新加载系统提示词（含工具说明注入）
+        
+        Args:
+            role_config: 新的角色配置（可选，为 None 时重新加载当前角色的提示词）
+        """
+        if role_config is not None:
+            self.role_config = role_config
+            if role_config.tools and role_config.tools.skills:
+                self._role_skills = role_config.tools.skills
+            else:
+                self._role_skills = None
+        
+        self._current_system_prompt = self._load_system_prompt()
+        self.agent = self._create_agent(self._current_system_prompt)
+        
+        self.logger.log_agent_action("system_prompt_reloaded", {
+            "role_config_updated": role_config is not None,
+            "role_skills": self._role_skills
+        })
+    
+    def reload_tools(self, tool_registry: ToolRegistry) -> None:
+        """重新加载工具列表
+        
+        Args:
+            tool_registry: 新的工具注册表
+        """
+        self.tool_registry = tool_registry
+        
+        self.tools = self._get_tools_for_role()
+        
+        self.agent = self._create_agent(self._current_system_prompt)
+        
+        self.logger.log_agent_action("tools_reloaded", {
+            "tool_count": len(self.tools),
+            "tool_names": [tool.name for tool in self.tools]
+        })
+    
+    def update_role_skills(self, skills: Optional[List[str]]) -> None:
+        """更新角色的 skills 配置并重新生成系统提示词
+        
+        Args:
+            skills: 角色配置的 skills 列表，为 None 时使用全局配置（不过滤）
+        """
+        self._role_skills = skills
+        self._current_system_prompt = self._load_system_prompt()
+        self.agent = self._create_agent(self._current_system_prompt)
+        
+        self.logger.log_agent_action("role_skills_updated", {
+            "skills": skills,
+            "filtered": skills is not None
+        })
+    
+    async def load_role_skills(self, skills: Optional[List[str]]) -> None:
+        """异步加载角色配置的 skills 全文并注入到系统提示词
+        
+        Args:
+            skills: 角色配置的 skills 列表
+        """
+        self._role_skills = skills
+        
+        if not skills or not self.skill_loader:
+            self._current_system_prompt = self._load_system_prompt()
+            self.agent = self._create_agent(self._current_system_prompt)
+            return
+        
+        skill_contents = []
+        for skill_name in skills:
+            if self.skill_loader.has_skill(skill_name):
+                content = await self.skill_loader.load_full_skill(skill_name)
+                if content:
+                    skill_contents.append(f"## {skill_name}\n\n{content}")
+                    self.context_manager.mark_skill_loaded(skill_name)
+                    self.logger.log_agent_action("skill_full_loaded", {
+                        "skill": skill_name,
+                        "content_length": len(content)
+                    })
+            else:
+                self.logger.log_agent_action("skill_not_found", {
+                "skill": skill_name
+            })
+        
+        if skill_contents:
+            skills_section = "\n\n# 角色专用 Skills\n\n" + "\n\n".join(skill_contents)
+            base_prompt = self._load_system_prompt()
+            self._current_system_prompt = f"{base_prompt}\n{skills_section}"
+        else:
+            self._current_system_prompt = self._load_system_prompt()
+        
+        self.agent = self._create_agent(self._current_system_prompt)
+        
+        self.logger.log_agent_action("role_skills_loaded", {
+            "skills": skills,
+            "loaded_count": len(skill_contents)
+        })
     
     def clear_context(self) -> None:
         """清空上下文"""

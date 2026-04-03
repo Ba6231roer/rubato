@@ -2,6 +2,7 @@ from ..base import BaseCommand
 from ..models import CommandResult, ResultType
 from ..registry import command
 from ...config.validators import ConfigValidationError
+from ...utils.logger import get_llm_logger
 
 
 @command
@@ -9,6 +10,9 @@ class RoleCommand(BaseCommand):
     name = "role"
     description = "角色管理"
     usage = "/role <name> | /role list | /role show <name>"
+    
+    def __init__(self):
+        self._logger = get_llm_logger()
     
     async def execute(self, args: str, context) -> CommandResult:
         if not context.role_manager:
@@ -121,19 +125,34 @@ class RoleCommand(BaseCommand):
             
             context.agent.context_manager.clear()
             
-            new_prompt = context.role_manager.load_system_prompt(name)
-            context.agent.system_prompt = new_prompt
-            context.agent._current_system_prompt = new_prompt
-            context.agent.agent = context.agent._create_agent(new_prompt)
+            role_skills = None
+            if role.tools and role.tools.skills:
+                role_skills = role.tools.skills
+            
+            new_tool_registry = context.agent_pool._create_tool_registry(
+                mcp_manager=getattr(context.agent, '_mcp_manager', None),
+                role_config=role
+            )
+            
+            context.agent.role_config = role
+            context.agent.reload_tools(new_tool_registry)
+            
+            await context.agent.load_role_skills(role_skills)
             
             merged_model = context.role_manager.get_merged_model_config(name)
             if merged_model:
                 context.agent.llm = context.agent._create_llm()
             
+            tools_info = self._get_tools_summary(new_tool_registry)
+            
+            skills_info = ""
+            if role_skills:
+                skills_info = f"\nSkills: {', '.join(role_skills)}"
+            
             return CommandResult(
                 type=ResultType.SUCCESS,
-                message=f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。",
-                data={"role": name, "description": role.description}
+                message=f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。\n{tools_info}{skills_info}",
+                data={"role": name, "description": role.description, "skills": role_skills}
             )
             
         except ConfigValidationError as e:
@@ -146,3 +165,35 @@ class RoleCommand(BaseCommand):
                 type=ResultType.ERROR,
                 message=f"切换角色时发生错误：{str(e)}"
             )
+    
+    def _get_tools_summary(self, tool_registry) -> str:
+        tools = tool_registry.get_all_tools()
+        if not tools:
+            return "工具: 无"
+        
+        builtin_tools = []
+        mcp_tools = []
+        other_tools = []
+        
+        builtin_names = {'spawn_agent', 'shell_tool', 'file_read', 'file_write', 
+                        'file_list', 'file_search', 'file_exists', 'file_mkdir', 
+                        'file_replace', 'file_delete'}
+        
+        for tool in tools:
+            tool_name = tool.name if hasattr(tool, 'name') else str(tool)
+            if tool_name in builtin_names:
+                builtin_tools.append(tool_name)
+            elif tool_name.startswith('browser_') or tool_name.startswith('mcp_'):
+                mcp_tools.append(tool_name)
+            else:
+                other_tools.append(tool_name)
+        
+        lines = [f"工具加载完成: {len(tools)}个工具"]
+        if builtin_tools:
+            lines.append(f"  - 内置工具: {', '.join(builtin_tools)}")
+        if mcp_tools:
+            lines.append(f"  - MCP工具: {', '.join(mcp_tools)}")
+        if other_tools:
+            lines.append(f"  - 其他工具: {', '.join(other_tools)}")
+        
+        return "\n".join(lines)

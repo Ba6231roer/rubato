@@ -6,7 +6,8 @@ from ...commands import CommandRegistry, CommandDispatcher, CommandContext
 from ...commands import (
     HelpCommand, QuitCommand, ConfigCommand, RoleCommand,
     SkillCommand, ToolCommand, BrowserCommand, HistoryCommand,
-    ClearCommand, NewCommand, ReloadCommand, PromptCommand
+    ClearCommand, NewCommand, ReloadCommand, PromptCommand,
+    StatusCommand
 )
 
 router = APIRouter()

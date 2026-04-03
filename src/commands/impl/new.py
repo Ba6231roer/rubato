@@ -20,10 +20,7 @@ class NewCommand(BaseCommand):
             
             current_role = context.role_manager.get_current_role() if context.role_manager else None
             if current_role:
-                system_prompt = context.role_manager.load_system_prompt(current_role.name)
-                context.agent.system_prompt = system_prompt
-                context.agent._current_system_prompt = system_prompt
-                context.agent.agent = context.agent._create_agent(system_prompt)
+                context.agent.reload_system_prompt(current_role)
             
             return CommandResult(
                 type=ResultType.SUCCESS,

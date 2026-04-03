@@ -226,6 +226,10 @@ rubato/
 | `/clear` | 清空对话历史 |
 | `/new` | 开始新对话（保留角色和系统提示词） |
 | `/reload` | 重新加载所有配置（模型、角色、Skill） |
+| `/status` | 显示当前状态概览（角色、工具数量、提示词长度） |
+| `/status full` | 显示完整状态信息（包含完整系统提示词和工具列表） |
+| `/status tools` | 显示当前可用工具 |
+| `/status prompt` | 显示完整系统提示词（包含工具说明） |
 | `/skill list` | 列出所有可用 Skills |
 | `/skill show <name>` | 显示 Skill 详情 |
 | `/tool list` | 列出所有可用工具 |

@@ -1,0 +1,23 @@
+name: _default
+description: 系统默认角色 - 基于 React 流程工作的任务系统
+system_prompt_file: prompts/roles/_default.txt
+
+model:
+  inherit: true
+
+execution:
+  max_context_tokens: 80000
+  timeout: 300
+  recursion_limit: 100
+  sub_agent_recursion_limit: 50
+
+tools:
+  builtin:
+    spawn_agent: true
+    shell_tool: true
+    file_tools:
+      enabled: true
+
+metadata:
+  version: "1.0"
+  author: "Rubato Team"

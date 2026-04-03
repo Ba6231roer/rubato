@@ -226,6 +226,10 @@ rubato/
 | `/clear` | Clear conversation history |
 | `/new` | Start new conversation (keeps role and system prompt) |
 | `/reload` | Reload all configurations (model, role, Skill) |
+| `/status` | Display current status overview (role, tool count, prompt length) |
+| `/status full` | Display full status info (includes complete system prompt and tool list) |
+| `/status tools` | Display current available tools |
+| `/status prompt` | Display complete system prompt (includes tool documentation) |
 | `/skill list` | List all available Skills |
 | `/skill show <name>` | Show Skill details |
 | `/tool list` | List all available tools |

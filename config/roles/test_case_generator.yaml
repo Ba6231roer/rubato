@@ -1,6 +1,7 @@
 name: test-case-generator
 description: 测试案例生成者 - 负责根据需求生成测试案例
 system_prompt_file: prompts/roles/test_case_generator.txt
+
 model:
   inherit: false
   provider: "openai"
@@ -9,21 +10,25 @@ model:
   base_url: https://api.deepseek.com/v1
   temperature: 0.8
   max_tokens: 80000
+
 execution:
   max_context_tokens: 80000
   timeout: 300
   recursion_limit: 100
   sub_agent_recursion_limit: 50
-available_tools:
-  - shell_tool
-  - spawn_agent
-  - file_read
-  - file_write
-  - file_replace
-  - file_list
-  - file_search
-  - file_exists
-  - file_mkdir
+
+tools:
+  builtin:
+    spawn_agent: true
+    shell_tool: true
+    file_tools:
+      enabled: true
+      permissions:
+        "read:*": "allow"
+        "write:*.md": "allow"
+        "write:*.txt": "allow"
+        "mkdir:*": "allow"
+
 metadata:
   version: "1.0"
   author: "Rubato Team"

@@ -6,6 +6,9 @@ from ..config.models import RoleConfig, ModelConfig, FullModelConfig
 from ..config.validators import ConfigValidationError
 
 
+DEFAULT_ROLE_NAME = "_default"
+
+
 class RoleManager:
     """角色管理器"""
     
@@ -24,6 +27,10 @@ class RoleManager:
         roles = self.loader.load_all()
         for name, role in roles.items():
             self._merged_model_configs[name] = self._merge_model_config(role)
+        
+        if self.has_role(DEFAULT_ROLE_NAME):
+            self._current_role = self.get_role(DEFAULT_ROLE_NAME)
+        
         return roles
     
     def _merge_model_config(self, role_config: RoleConfig) -> ModelConfig:
@@ -83,11 +90,22 @@ class RoleManager:
     
     def get_current_role(self) -> Optional[RoleConfig]:
         """获取当前角色"""
+        if self._current_role is None and self.has_role(DEFAULT_ROLE_NAME):
+            self._current_role = self.get_role(DEFAULT_ROLE_NAME)
         return self._current_role
     
+    def get_default_role(self) -> Optional[RoleConfig]:
+        """获取系统默认角色"""
+        return self.get_role(DEFAULT_ROLE_NAME)
+    
+    def is_default_role(self, role_name: str) -> bool:
+        """检查是否为默认角色"""
+        return role_name == DEFAULT_ROLE_NAME
+    
     def list_roles(self) -> List[str]:
-        """列出所有角色名称"""
-        return self.loader.list_roles()
+        """列出所有角色名称（排除默认角色）"""
+        all_roles = self.loader.list_roles()
+        return [r for r in all_roles if r != DEFAULT_ROLE_NAME]
     
     def get_all_roles(self) -> Dict[str, RoleConfig]:
         """获取所有角色配置"""
@@ -100,6 +118,8 @@ class RoleManager:
             return None
         
         merged_model = self.get_merged_model_config(name)
+        
+        tools_info = self._get_tools_info(role)
         
         return {
             "name": role.name,
@@ -119,7 +139,27 @@ class RoleManager:
                 "sub_agent_recursion_limit": role.execution.sub_agent_recursion_limit,
             },
             "available_tools": role.available_tools,
+            "tools": tools_info,
             "metadata": role.metadata
+        }
+    
+    def _get_tools_info(self, role: RoleConfig) -> Dict[str, Any]:
+        """获取角色的工具配置信息"""
+        if role.tools:
+            return {
+                "builtin": role.tools.builtin if role.tools.builtin else {},
+                "mcp": role.tools.mcp if role.tools.mcp else {},
+                "skills": role.tools.skills if role.tools.skills else []
+            }
+        
+        return {
+            "builtin": {
+                "spawn_agent": True,
+                "shell_tool": True,
+                "file_tools": {"enabled": True}
+            },
+            "mcp": {},
+            "skills": []
         }
     
     def load_system_prompt(self, role_name: Optional[str] = None) -> str:
