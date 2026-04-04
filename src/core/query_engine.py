@@ -19,11 +19,12 @@ from typing import (
     Union,
 )
 
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 from ..skills.parser import SkillMetadata
 from ..utils.logger import get_llm_logger
+from .llm_wrapper import LLMCaller
 
 
 @dataclass
@@ -170,6 +171,7 @@ Skill = Union[SkillMetadata, Dict[str, Any], str]
 class QueryEngineConfig:
     """QueryEngine 配置"""
     cwd: str
+    llm: Any
     tools: List[BaseTool]
     skills: List[Skill]
     can_use_tool: Callable[[str, Dict[str, Any]], bool]
@@ -201,6 +203,20 @@ class QueryEngine:
         self._current_turn: int = 0
         self._is_running: bool = False
         self.logger = get_llm_logger()
+        
+        # 创建 LLMCaller，传递 logger 和 timeout
+        timeout = config.max_budget_usd or 300.0  # 默认 300 秒超时
+        self.llm_caller = LLMCaller(
+            llm=config.llm,
+            tools=config.tools,
+            system_prompt=config.custom_system_prompt,
+            logger=self.logger,
+            timeout=timeout
+        )
+        
+        self._tool_map: Dict[str, BaseTool] = {
+            tool.name: tool for tool in config.tools
+        }
     
     async def submit_message(
         self,
@@ -294,31 +310,228 @@ class QueryEngine:
     ) -> AsyncGenerator[SDKMessage, None]:
         """运行 ReAct 循环
         
+        这是 Query Engine 的核心方法，实现了完整的 ReAct 循环：
+        1. 调用 LLM 获取响应
+        2. 检测并执行工具调用
+        3. 处理工具结果
+        4. 循环直到任务完成或达到限制
+        
         Args:
             options: 提交选项
             
         Yields:
-            SDKMessage: 流式消息
+            SDKMessage: 流式消息事件
         """
-        self._current_turn += 1
+        max_no_tool_turns = 3
+        no_tool_turn_count = 0
         
-        yield SDKMessage.assistant(
-            content=f"[轮次 {self._current_turn}] 开始处理...",
-            metadata={"phase": "reason", "turn": self._current_turn}
-        )
-        
-        for skill in self.config.skills:
-            skill_name = self._get_skill_name(skill)
-            if skill_name:
-                yield SDKMessage.assistant(
-                    content=f"检测到 Skill: {skill_name}",
-                    metadata={"phase": "skill_detection", "skill": skill_name}
+        while self._current_turn < (self.config.max_turns or 100):
+            self._current_turn += 1
+            
+            self.logger.log_agent_action("react_loop_start", {
+                "session_id": self._session_id,
+                "turn": self._current_turn,
+                "max_turns": self.config.max_turns,
+                "message_count": len(self.mutable_messages)
+            })
+            
+            yield SDKMessage.assistant(
+                content="",
+                metadata={
+                    "phase": "reason_start",
+                    "turn": self._current_turn
+                }
+            )
+            
+            llm_response = None
+            async for chunk in self._stream_llm_call():
+                if chunk.get("type") == "text_delta":
+                    yield SDKMessage.assistant(
+                        content=chunk.get("text", ""),
+                        metadata={"phase": "streaming"}
+                    )
+                elif chunk.get("type") == "tool_call_start":
+                    tool_info = chunk.get("tool", {})
+                    yield SDKMessage.tool_use(
+                        tool_name=tool_info.get("name"),
+                        tool_args=tool_info.get("args", {}),
+                        tool_call_id=tool_info.get("id"),
+                        turn=self._current_turn
+                    )
+                elif chunk.get("type") == "complete":
+                    llm_response = chunk.get("response")
+            
+            if llm_response is None:
+                yield SDKMessage.error(
+                    message="LLM 响应为空",
+                    error_type="empty_response"
                 )
+                break
+            
+            self.mutable_messages.append(llm_response)
+            
+            self._update_usage_from_response(llm_response)
+            
+            if not hasattr(llm_response, 'tool_calls') or not llm_response.tool_calls:
+                no_tool_turn_count += 1
+                
+                self.logger.log_agent_action("no_tool_call", {
+                    "session_id": self._session_id,
+                    "turn": self._current_turn,
+                    "no_tool_turn_count": no_tool_turn_count,
+                    "content_preview": llm_response.content[:200] if llm_response.content else ""
+                })
+                
+                content_str = str(llm_response.content) if llm_response.content else ""
+                completion_indicators = [
+                    "完成", "已完成", "成功", "结束", "完毕",
+                    "测试报告", "汇总", "结果如下"
+                ]
+                
+                task_seems_complete = any(
+                    indicator in content_str 
+                    for indicator in completion_indicators
+                ) and len(content_str) > 100
+                
+                if task_seems_complete or no_tool_turn_count >= max_no_tool_turns:
+                    yield SDKMessage.assistant(
+                        content=llm_response.content,
+                        metadata={"phase": "final", "reason": "task_complete" if task_seems_complete else "max_no_tool_turns"}
+                    )
+                    break
+                else:
+                    tool_names = list(self._tool_map.keys())
+                    guidance_msg = HumanMessage(
+                        content=f"""你刚才的回复没有使用任何工具。请使用可用的工具来完成任务。
+
+可用工具列表: {', '.join(tool_names[:10])}
+
+请选择合适的工具来执行下一步操作。如果你认为任务已经完成，请明确说明"任务已完成"。"""
+                    )
+                    self.mutable_messages.append(guidance_msg)
+                    
+                    yield SDKMessage.assistant(
+                        content="",
+                        metadata={
+                            "phase": "guidance_added",
+                            "turn": self._current_turn,
+                            "no_tool_turn_count": no_tool_turn_count
+                        }
+                    )
+                    
+                    self.logger.log_agent_action("guidance_added", {
+                        "session_id": self._session_id,
+                        "turn": self._current_turn,
+                        "available_tools": tool_names[:5]
+                    })
+                    continue
+            
+            no_tool_turn_count = 0
+            
+            yield SDKMessage.assistant(
+                content="",
+                metadata={
+                    "phase": "tool_execution_start",
+                    "tool_count": len(llm_response.tool_calls)
+                }
+            )
+            
+            for tool_call in llm_response.tool_calls:
+                tool_name = tool_call.get("name")
+                tool_args = tool_call.get("args", {})
+                tool_call_id = tool_call.get("id")
+                
+                if not self.config.can_use_tool(tool_name, tool_args):
+                    denial_reason = f"工具 '{tool_name}' 权限被拒绝"
+                    self.add_permission_denial(tool_name, denial_reason)
+                    
+                    tool_result_msg = ToolMessage(
+                        content=f"权限拒绝: {denial_reason}",
+                        tool_call_id=tool_call_id
+                    )
+                    self.mutable_messages.append(tool_result_msg)
+                    
+                    yield SDKMessage.tool_result(
+                        tool_name=tool_name,
+                        result=f"权限拒绝: {denial_reason}",
+                        tool_call_id=tool_call_id,
+                        status="denied"
+                    )
+                    continue
+                
+                tool_instance = self._tool_map.get(tool_name)
+                if tool_instance is None:
+                    error_msg = f"工具 '{tool_name}' 不存在"
+                    tool_result_msg = ToolMessage(
+                        content=error_msg,
+                        tool_call_id=tool_call_id
+                    )
+                    self.mutable_messages.append(tool_result_msg)
+                    
+                    yield SDKMessage.tool_result(
+                        tool_name=tool_name,
+                        result=error_msg,
+                        tool_call_id=tool_call_id,
+                        status="error"
+                    )
+                    continue
+                
+                try:
+                    yield SDKMessage.assistant(
+                        content="",
+                        metadata={
+                            "phase": "tool_executing",
+                            "tool_name": tool_name
+                        }
+                    )
+                    
+                    result = await self._execute_tool_safe(
+                        tool_instance,
+                        tool_args,
+                        tool_call_id
+                    )
+                    
+                    tool_result_msg = ToolMessage(
+                        content=str(result),
+                        tool_call_id=tool_call_id
+                    )
+                    self.mutable_messages.append(tool_result_msg)
+                    
+                    yield SDKMessage.tool_result(
+                        tool_name=tool_name,
+                        result=result,
+                        tool_call_id=tool_call_id,
+                        status="success"
+                    )
+                    
+                except Exception as e:
+                    error_msg = f"工具执行错误: {str(e)}"
+                    tool_result_msg = ToolMessage(
+                        content=error_msg,
+                        tool_call_id=tool_call_id
+                    )
+                    self.mutable_messages.append(tool_result_msg)
+                    
+                    yield SDKMessage.tool_result(
+                        tool_name=tool_name,
+                        result=error_msg,
+                        tool_call_id=tool_call_id,
+                        status="error"
+                    )
+            
+            yield SDKMessage.assistant(
+                content="",
+                metadata={
+                    "phase": "tool_execution_complete",
+                    "turn": self._current_turn
+                }
+            )
         
-        yield SDKMessage.assistant(
-            content="处理完成",
-            metadata={"phase": "complete", "turn": self._current_turn}
-        )
+        if self._current_turn >= (self.config.max_turns or 100):
+            yield SDKMessage.error(
+                message=f"达到最大轮次限制: {self.config.max_turns}",
+                error_type="max_turns_reached"
+            )
     
     def _get_skill_name(self, skill: Skill) -> Optional[str]:
         """获取 Skill 名称"""
@@ -468,3 +681,94 @@ class QueryEngine:
         self.total_usage.completion_tokens += completion_tokens
         self.total_usage.total_tokens += prompt_tokens + completion_tokens
         self.total_usage.cost_usd += cost_usd
+    
+    async def _stream_llm_call(self) -> AsyncGenerator[Dict[str, Any], None]:
+        """流式调用 LLM
+        
+        内部方法，处理 LLM 的流式响应。
+        
+        Yields:
+            Dict[str, Any]: 流式响应块
+        """
+        messages = self._prepare_messages_for_llm()
+        
+        async for chunk in self.llm_caller.stream_call(messages, use_tools=True):
+            yield chunk
+    
+    def _prepare_messages_for_llm(self) -> List[BaseMessage]:
+        """准备发送给 LLM 的消息列表
+        
+        Returns:
+            List[BaseMessage]: 准备好的消息列表
+        """
+        return list(self.mutable_messages)
+    
+    async def _execute_tool_safe(
+        self,
+        tool: BaseTool,
+        args: Dict[str, Any],
+        tool_call_id: str
+    ) -> Any:
+        """安全执行工具
+        
+        Args:
+            tool: 工具实例
+            args: 工具参数
+            tool_call_id: 工具调用 ID
+            
+        Returns:
+            Any: 工具执行结果
+        """
+        self.logger.log_agent_action("tool_execution_start", {
+            "session_id": self._session_id,
+            "tool_name": tool.name,
+            "tool_args": args,
+            "tool_call_id": tool_call_id
+        })
+        
+        try:
+            if hasattr(tool, 'ainvoke'):
+                result = await tool.ainvoke(args)
+            else:
+                result = tool.invoke(args)
+            
+            self.logger.log_agent_action("tool_execution_success", {
+                "session_id": self._session_id,
+                "tool_name": tool.name,
+                "tool_call_id": tool_call_id,
+                "result_length": len(str(result)) if result else 0
+            })
+            
+            return result
+            
+        except Exception as e:
+            self.logger.log_agent_action("tool_execution_error", {
+                "session_id": self._session_id,
+                "tool_name": tool.name,
+                "tool_call_id": tool_call_id,
+                "error": str(e)
+            })
+            raise
+    
+    def _update_usage_from_response(self, response: AIMessage) -> None:
+        """从响应中更新使用量统计
+        
+        Args:
+            response: AI 响应
+        """
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            input_tokens = response.usage_metadata.get("input_tokens", 0)
+            output_tokens = response.usage_metadata.get("output_tokens", 0)
+            total_tokens = response.usage_metadata.get("total_tokens", 0)
+            
+            self.total_usage.prompt_tokens += input_tokens
+            self.total_usage.completion_tokens += output_tokens
+            self.total_usage.total_tokens += total_tokens
+            
+            self.logger.log_agent_action("usage_updated", {
+                "session_id": self._session_id,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+                "cumulative_tokens": self.total_usage.total_tokens
+            })

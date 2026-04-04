@@ -115,7 +115,12 @@ class LLMLogger:
         
         for tool in tools:
             if isinstance(tool, dict):
-                tool_name = tool.get('name', 'unknown')
+                if 'function' in tool and isinstance(tool.get('function'), dict):
+                    tool_name = tool.get('function', {}).get('name', 'unknown')
+                elif 'name' in tool:
+                    tool_name = tool.get('name', 'unknown')
+                else:
+                    tool_name = 'unknown'
             elif hasattr(tool, 'name'):
                 tool_name = tool.name
             else:

@@ -7,6 +7,7 @@ from typing import List, Optional
 import time
 
 from ..config.loader import ConfigLoader
+from .llm_wrapper import RobustChatOpenAI
 from ..config.models import AppConfig, RoleConfig
 from ..mcp.tools import ToolRegistry
 from ..skills.loader import SkillLoader
@@ -277,6 +278,7 @@ class RubatoAgent:
         
         query_config = QueryEngineConfig(
             cwd=str(self.config.project.root) if self.config.project else ".",
+            llm=self.llm,
             tools=self.tools,
             skills=skills,
             can_use_tool=can_use_tool,
@@ -300,7 +302,7 @@ class RubatoAgent:
             model_config: 可选的模型配置，如果提供则使用该配置，否则使用默认配置
             
         Returns:
-            ChatOpenAI: LLM实例
+            RobustChatOpenAI: LLM实例（带有重试逻辑）
         """
         from ..config.models import ModelConfig
         
@@ -316,7 +318,7 @@ class RubatoAgent:
             "callbacks": [self.logger.get_callback_handler()]
         }
         
-        return ChatOpenAI(
+        return RobustChatOpenAI(
             **llm_kwargs
         )
     
@@ -880,6 +882,80 @@ class RubatoAgent:
         """获取已加载的Skills"""
         return self.context_manager.get_loaded_skills()
     
+    def _reload_execution_config(self) -> dict:
+        """重新加载执行配置
+        
+        根据 role_config 更新所有 RoleExecutionConfig 相关属性：
+        - max_context_tokens
+        - recursion_limit
+        - sub_agent_recursion_limit（需要重建 SubAgentManager）
+        - use_query_engine（需要重建 QueryEngine）
+        
+        Returns:
+            dict: 配置变更记录，用于日志
+        """
+        old_values = {
+            "recursion_limit": self.recursion_limit,
+            "use_query_engine": self.use_query_engine,
+            "sub_agent_recursion_limit": self._sub_agent_manager.recursion_limit,
+            "max_context_tokens": self.max_context_tokens
+        }
+        
+        if self.role_config and self.role_config.execution:
+            exec_config = self.role_config.execution
+            
+            self.max_context_tokens = (
+                exec_config.max_context_tokens
+                if exec_config.max_context_tokens
+                else self.config.agent.max_context_tokens
+            )
+            
+            self.recursion_limit = (
+                exec_config.recursion_limit
+                if exec_config.recursion_limit
+                else self.config.agent.execution.recursion_limit
+            )
+            
+            sub_agent_recursion_limit = (
+                exec_config.sub_agent_recursion_limit
+                if exec_config.sub_agent_recursion_limit
+                else self.config.agent.execution.sub_agent_recursion_limit
+            )
+            
+            self.use_query_engine = (
+                exec_config.use_query_engine
+                if hasattr(exec_config, 'use_query_engine')
+                else False
+            )
+        else:
+            self.max_context_tokens = self.config.agent.max_context_tokens
+            self.recursion_limit = self.config.agent.execution.recursion_limit
+            sub_agent_recursion_limit = self.config.agent.execution.sub_agent_recursion_limit
+            self.use_query_engine = False
+        
+        if sub_agent_recursion_limit != old_values["sub_agent_recursion_limit"]:
+            self._sub_agent_manager = SubAgentManager(
+                llm=self.llm,
+                parent_agent=self,
+                sub_agents_dir="sub_agents",
+                recursion_limit=sub_agent_recursion_limit
+            )
+            spawn_agent_tool = create_spawn_agent_tool(self._sub_agent_manager)
+            self.tools = [t for t in self.tools if t.name != 'spawn_agent']
+            self.tools.append(spawn_agent_tool)
+        
+        if self.use_query_engine:
+            self._query_engine = self._create_query_engine()
+        else:
+            self._query_engine = None
+        
+        return {
+            "recursion_limit": {"old": old_values["recursion_limit"], "new": self.recursion_limit},
+            "use_query_engine": {"old": old_values["use_query_engine"], "new": self.use_query_engine},
+            "sub_agent_recursion_limit": {"old": old_values["sub_agent_recursion_limit"], "new": self._sub_agent_manager.recursion_limit},
+            "max_context_tokens": {"old": old_values["max_context_tokens"], "new": self.max_context_tokens}
+        }
+    
     def reload_system_prompt(self, role_config: Optional[RoleConfig] = None) -> None:
         """重新加载系统提示词（含工具说明注入）
         
@@ -892,14 +968,20 @@ class RubatoAgent:
                 self._role_skills = role_config.tools.skills
             else:
                 self._role_skills = None
+            
+            config_changes = self._reload_execution_config()
         
         self._current_system_prompt = self._load_system_prompt()
         self.agent = self._create_agent(self._current_system_prompt)
         
-        self.logger.log_agent_action("system_prompt_reloaded", {
+        log_data = {
             "role_config_updated": role_config is not None,
             "role_skills": self._role_skills
-        })
+        }
+        if role_config is not None:
+            log_data["config_changes"] = config_changes
+        
+        self.logger.log_agent_action("system_prompt_reloaded", log_data)
     
     def reload_tools(self, tool_registry: ToolRegistry) -> None:
         """重新加载工具列表
@@ -911,11 +993,14 @@ class RubatoAgent:
         
         self.tools = self._get_tools_for_role()
         
+        config_changes = self._reload_execution_config()
+        
         self.agent = self._create_agent(self._current_system_prompt)
         
         self.logger.log_agent_action("tools_reloaded", {
             "tool_count": len(self.tools),
-            "tool_names": [tool.name for tool in self.tools]
+            "tool_names": [tool.name for tool in self.tools],
+            "config_changes": config_changes
         })
     
     def update_role_skills(self, skills: Optional[List[str]]) -> None:
