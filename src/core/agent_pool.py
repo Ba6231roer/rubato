@@ -182,10 +182,17 @@ class AgentPool:
             tools_summary["builtin"].append("shell_tool")
         
         if mcp_manager is not None:
-            mcp_config = self.config.mcp.model_dump() if self.config.mcp else {}
-            mcp_provider = MCPToolProvider(mcp_config, mcp_manager)
-            registry.register_provider(mcp_provider)
-            tools_summary["mcp"] = ["mcp_tools"]
+            should_register_mcp = True
+            if role_config and role_config.tools and role_config.tools.mcp:
+                mcp_role_config = role_config.tools.mcp
+                if isinstance(mcp_role_config, dict):
+                    should_register_mcp = mcp_role_config.get('enabled', True)
+            
+            if should_register_mcp:
+                mcp_config = self.config.mcp.model_dump() if self.config.mcp else {}
+                mcp_provider = MCPToolProvider(mcp_config, mcp_manager)
+                registry.register_provider(mcp_provider)
+                tools_summary["mcp"] = ["mcp_tools"]
         
         if self._should_enable_file_tools(role_config, unified_config):
             file_tool_provider = self._create_file_tool_provider(role_config, unified_config)

@@ -21,6 +21,8 @@ tools:
         "read:*": "allow"
         "write:*.md": "allow"
         "write:*.txt": "allow"
+  mcp:
+    enabled: false
   skills:
     - playwright-cli
 

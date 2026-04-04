@@ -1,3 +1,4 @@
+import re
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
@@ -9,10 +10,12 @@ from ..config.loader import ConfigLoader
 from ..config.models import AppConfig, RoleConfig
 from ..mcp.tools import ToolRegistry
 from ..skills.loader import SkillLoader
+from ..skills.manager import SkillManager
 from ..context.manager import ContextManager
 from .sub_agents import SubAgentManager, create_spawn_agent_tool
 from ..utils.logger import get_llm_logger
 from ..tools.docs import generate_tool_docs_for_prompt
+from .query_engine import QueryEngine, QueryEngineConfig, FileStateCache
 
 
 def _content_to_str(content) -> str:
@@ -194,12 +197,25 @@ class RubatoAgent:
         
         self.agent = self._create_agent(self._current_system_prompt)
         
+        self.use_query_engine = (
+            role_config.execution.use_query_engine
+            if role_config and role_config.execution and hasattr(role_config.execution, 'use_query_engine')
+            else False
+        )
+        
+        self._query_engine: Optional[QueryEngine] = None
+        self._file_state_cache = FileStateCache()
+        
+        if self.use_query_engine:
+            self._query_engine = self._create_query_engine()
+        
         self.logger.log_agent_action("agent_initialized", {
             "model": config.model.model.name,
             "tool_count": len(self.tools),
             "max_context_tokens": self.max_context_tokens,
             "recursion_limit": self.recursion_limit,
-            "compression_enabled": self.compression_config.enabled
+            "compression_enabled": self.compression_config.enabled,
+            "use_query_engine": self.use_query_engine
         })
     
     def _create_agent(self, system_prompt: str):
@@ -237,6 +253,45 @@ class RubatoAgent:
             prompt=system_prompt,
             pre_model_hook=pre_model_hook
         )
+    
+    def _create_query_engine(self) -> QueryEngine:
+        """创建 QueryEngine 实例"""
+        def can_use_tool(tool_name: str, args: dict) -> bool:
+            return True
+        
+        def get_app_state() -> dict:
+            return self.context_manager.get_context()
+        
+        def set_app_state(state: dict) -> None:
+            pass
+        
+        skills = []
+        if self.skill_loader:
+            try:
+                skill_metadata = self.skill_loader.get_all_skill_metadata()
+                for name, meta in skill_metadata.items():
+                    if self._role_skills is None or name in self._role_skills:
+                        skills.append(meta)
+            except Exception:
+                pass
+        
+        query_config = QueryEngineConfig(
+            cwd=str(self.config.project.root) if self.config.project else ".",
+            tools=self.tools,
+            skills=skills,
+            can_use_tool=can_use_tool,
+            get_app_state=get_app_state,
+            set_app_state=set_app_state,
+            initial_messages=self.context_manager.get_messages(),
+            read_file_cache=self._file_state_cache,
+            custom_system_prompt=self._current_system_prompt,
+            max_turns=self.recursion_limit,
+            model_name=self.config.model.model.name,
+            temperature=self.config.model.model.temperature,
+            max_tokens=self.config.model.model.max_tokens
+        )
+        
+        return QueryEngine(query_config)
     
     def _create_llm(self, model_config: Optional['ModelConfig'] = None):
         """创建LLM实例
@@ -394,9 +449,49 @@ class RubatoAgent:
 4. 结果导向：确保完成用户的目标
 """
     
+    def _extract_file_paths_from_input(self, user_input: str) -> List[str]:
+        """从用户输入中提取可能的文件路径
+        
+        Args:
+            user_input: 用户输入文本
+            
+        Returns:
+            List[str]: 提取的文件路径列表
+        """
+        paths = []
+        
+        file_patterns = [
+            r'[a-zA-Z]:\\[-\\\w\s]+\\\.[\w]+',
+            r'/[-\w\s]+/([-\w\s]+/)*[-\w\s]+\.[\w]+',
+            r'\./[-\w\s./]+',
+            r'\.\./[-\w\s./]+',
+            r'"[^"]+\.[\w]+"',
+            r"'[^']+\.[\w]+'",
+        ]
+        
+        for pattern in file_patterns:
+            matches = re.findall(pattern, user_input)
+            for match in matches:
+                if isinstance(match, tuple):
+                    match = match[0]
+                match = match.strip('"\'')
+                if match and match not in paths:
+                    paths.append(match)
+        
+        return paths
+    
     async def run(self, user_input: str) -> str:
         """运行Agent，使用流式处理记录每个步骤"""
         self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
+        
+        file_paths = self._extract_file_paths_from_input(user_input)
+        if file_paths:
+            activated = self.activate_skills_for_paths(file_paths)
+            if activated:
+                self.logger.log_agent_action("auto_activated_skills", {
+                    "skills": activated,
+                    "extracted_paths": file_paths
+                })
         
         if self.mcp_manager and self.mcp_manager.is_connected:
             browser_ok = await self.mcp_manager.ensure_browser()
@@ -411,6 +506,9 @@ class RubatoAgent:
             self._current_system_prompt = enhanced_prompt
             self.agent = self._create_agent(enhanced_prompt)
             self.context_manager.mark_skill_loaded(skill_name)
+        
+        if self.use_query_engine and self._query_engine:
+            return await self._run_with_query_engine(user_input)
         
         self.context_manager.add_user_message(user_input)
         
@@ -486,9 +584,104 @@ class RubatoAgent:
             })
             raise
     
+    async def _run_with_query_engine(self, user_input: str) -> str:
+        """使用 QueryEngine 运行 Agent
+        
+        Args:
+            user_input: 用户输入
+            
+        Returns:
+            str: 最终响应
+        """
+        from .query_engine import SDKMessage, SubmitOptions
+        
+        self.context_manager.add_user_message(user_input)
+        
+        self._query_engine = self._create_query_engine()
+        
+        self.logger.log_agent_action("query_engine_start", {
+            "session_id": self._query_engine.get_session_id(),
+            "prompt_length": len(user_input)
+        })
+        
+        start_time = time.time()
+        final_content = ""
+        
+        try:
+            options = SubmitOptions(stream=True)
+            
+            async for message in self._query_engine.submit_message(user_input, options):
+                if message.type == "assistant":
+                    content = message.content
+                    if isinstance(content, str) and content:
+                        final_content = content
+                        self.logger.log_agent_thinking(content)
+                        
+                elif message.type == "tool_use":
+                    tool_info = message.content
+                    self.logger.log_tool_call(
+                        tool_info.get("name", "unknown"),
+                        tool_info.get("args", {})
+                    )
+                    
+                elif message.type == "tool_result":
+                    tool_info = message.content
+                    self.logger.log_tool_result(
+                        tool_info.get("name", "unknown"),
+                        tool_info.get("result", "")
+                    )
+                    
+                elif message.type == "error":
+                    error_info = message.content
+                    self.logger.log_error("query_engine", Exception(
+                        f"{error_info.get('error_type', 'unknown')}: {error_info.get('message', '')}"
+                    ))
+                    
+                elif message.type == "result":
+                    final_content = message.content if isinstance(message.content, str) else final_content
+                    
+            for msg in self._query_engine.get_messages():
+                if isinstance(msg, AIMessage):
+                    self.context_manager.add_ai_message_full(msg)
+                elif isinstance(msg, ToolMessage):
+                    self.context_manager.add_tool_message(
+                        _content_to_str(msg.content),
+                        msg.tool_call_id
+                    )
+            
+            elapsed = time.time() - start_time
+            usage = self._query_engine.get_usage()
+            
+            self.logger.log_agent_action("query_engine_complete", {
+                "elapsed_seconds": round(elapsed, 2),
+                "total_tokens": usage.total_tokens,
+                "cost_usd": usage.cost_usd
+            })
+            
+            return final_content if final_content else "任务已完成"
+            
+        except Exception as e:
+            import traceback
+            self.logger.log_error("query_engine_run", e)
+            self.logger.log_agent_action("query_engine_error", {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "traceback": traceback.format_exc()
+            })
+            raise
+    
     async def run_stream(self, user_input: str):
         """运行Agent，流式返回响应内容（用于WebSocket）"""
         self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
+        
+        file_paths = self._extract_file_paths_from_input(user_input)
+        if file_paths:
+            activated = self.activate_skills_for_paths(file_paths)
+            if activated:
+                self.logger.log_agent_action("auto_activated_skills", {
+                    "skills": activated,
+                    "extracted_paths": file_paths
+                })
         
         if self.mcp_manager and self.mcp_manager.is_connected:
             browser_ok = await self.mcp_manager.ensure_browser()
@@ -504,6 +697,11 @@ class RubatoAgent:
             self._current_system_prompt = enhanced_prompt
             self.agent = self._create_agent(enhanced_prompt)
             self.context_manager.mark_skill_loaded(skill_name)
+        
+        if self.use_query_engine and self._query_engine:
+            async for content in self._run_stream_with_query_engine(user_input):
+                yield content
+            return
         
         self.context_manager.add_user_message(user_input)
         messages = self.context_manager.get_messages()
@@ -564,6 +762,100 @@ class RubatoAgent:
             import traceback
             self.logger.log_error("agent_invoke", e)
             self.logger.log_agent_action("agent_invoke_error_details", {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "traceback": traceback.format_exc()
+            })
+            yield f"执行错误: {str(e)}"
+    
+    async def _run_stream_with_query_engine(self, user_input: str):
+        """使用 QueryEngine 流式运行 Agent
+        
+        Args:
+            user_input: 用户输入
+            
+        Yields:
+            str: 流式响应内容
+        """
+        from .query_engine import SDKMessage, SubmitOptions
+        
+        self.context_manager.add_user_message(user_input)
+        
+        self._query_engine = self._create_query_engine()
+        
+        self.logger.log_agent_action("query_engine_stream_start", {
+            "session_id": self._query_engine.get_session_id(),
+            "prompt_length": len(user_input)
+        })
+        
+        start_time = time.time()
+        final_content = ""
+        
+        try:
+            options = SubmitOptions(stream=True)
+            
+            async for message in self._query_engine.submit_message(user_input, options):
+                if message.type == "assistant":
+                    content = message.content
+                    if isinstance(content, str) and content:
+                        final_content = content
+                        yield content
+                        
+                elif message.type == "tool_use":
+                    tool_info = message.content
+                    self.logger.log_tool_call(
+                        tool_info.get("name", "unknown"),
+                        tool_info.get("args", {})
+                    )
+                    yield f"\n[调用工具: {tool_info.get('name', 'unknown')}]\n"
+                    
+                elif message.type == "tool_result":
+                    tool_info = message.content
+                    self.logger.log_tool_result(
+                        tool_info.get("name", "unknown"),
+                        tool_info.get("result", "")
+                    )
+                    
+                elif message.type == "error":
+                    error_info = message.content
+                    self.logger.log_error("query_engine", Exception(
+                        f"{error_info.get('error_type', 'unknown')}: {error_info.get('message', '')}"
+                    ))
+                    yield f"\n[错误: {error_info.get('message', '')}]\n"
+                    
+                elif message.type == "interrupt":
+                    reason = message.content.get("reason", "未知原因")
+                    yield f"\n[中断: {reason}]\n"
+                    
+                elif message.type == "result":
+                    if isinstance(message.content, str) and message.content:
+                        final_content = message.content
+            
+            for msg in self._query_engine.get_messages():
+                if isinstance(msg, AIMessage):
+                    self.context_manager.add_ai_message_full(msg)
+                elif isinstance(msg, ToolMessage):
+                    self.context_manager.add_tool_message(
+                        _content_to_str(msg.content),
+                        msg.tool_call_id
+                    )
+            
+            elapsed = time.time() - start_time
+            usage = self._query_engine.get_usage()
+            
+            self.logger.log_agent_action("query_engine_stream_complete", {
+                "elapsed_seconds": round(elapsed, 2),
+                "total_tokens": usage.total_tokens,
+                "cost_usd": usage.cost_usd
+            })
+            
+            if not final_content:
+                yield "任务已完成"
+            
+        except Exception as e:
+            import traceback
+            self.logger.log_error("query_engine_stream", e)
+            self.logger.log_agent_action("query_engine_stream_error", {
                 "error_type": type(e).__name__,
                 "error_message": str(e),
                 "traceback": traceback.format_exc()
@@ -687,6 +979,62 @@ class RubatoAgent:
     def clear_context(self) -> None:
         """清空上下文"""
         self.context_manager.clear()
+    
+    def activate_skills_for_paths(self, file_paths: List[str]) -> List[str]:
+        """激活匹配文件路径的条件 Skills
+        
+        Args:
+            file_paths: 用户正在操作的文件路径列表
+            
+        Returns:
+            List[str]: 激活的 Skill 名称列表
+        """
+        if not isinstance(self.skill_loader, SkillManager):
+            self.logger.log_agent_action("skill_manager_not_available", {
+                "message": "SkillLoader is not SkillManager, skipping conditional activation"
+            })
+            return []
+        
+        activated = []
+        
+        discovered = self.skill_loader.discover_for_paths(file_paths)
+        if discovered:
+            self.logger.log_agent_action("skills_discovered", {
+                "skills": discovered,
+                "paths": file_paths
+            })
+            activated.extend(discovered)
+        
+        conditional_activated = self.skill_loader.activate_for_paths(file_paths)
+        if conditional_activated:
+            self.logger.log_agent_action("conditional_skills_activated", {
+                "skills": conditional_activated,
+                "paths": file_paths
+            })
+            activated.extend(conditional_activated)
+        
+        return activated
+    
+    def get_skill_manager_stats(self) -> dict:
+        """获取 SkillManager 统计信息
+        
+        Returns:
+            dict: 包含条件 Skills、动态 Skills 和已发现目录的数量
+        """
+        if not isinstance(self.skill_loader, SkillManager):
+            return {
+                "is_skill_manager": False,
+                "conditional_skills": 0,
+                "dynamic_skills": 0,
+                "discovered_dirs": 0
+            }
+        
+        return {
+            "is_skill_manager": True,
+            "conditional_skills": self.skill_loader.get_conditional_skills_count(),
+            "dynamic_skills": self.skill_loader.get_dynamic_skills_count(),
+            "discovered_dirs": self.skill_loader.get_discovered_dirs_count()
+        }
     
     def update_config(self, new_config: AppConfig) -> None:
         """更新配置（支持热重载）"""

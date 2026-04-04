@@ -12,6 +12,7 @@ class SkillMetadata(BaseModel):
     author: str = ""
     triggers: List[str] = []
     tools: List[str] = []
+    paths: List[str] = []
     file_path: str = ""
 
 
@@ -46,6 +47,7 @@ class SkillParser:
                     author=metadata_dict.get('author', ''),
                     triggers=metadata_dict.get('triggers', []),
                     tools=metadata_dict.get('tools', []),
+                    paths=metadata_dict.get('paths', []),
                 )
                 
                 return metadata, body

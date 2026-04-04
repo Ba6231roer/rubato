@@ -144,6 +144,7 @@ class RoleExecutionConfig(BaseModel):
     timeout: int = 300
     recursion_limit: Optional[int] = None
     sub_agent_recursion_limit: Optional[int] = None
+    use_query_engine: bool = False
 
     @field_validator('max_context_tokens', 'timeout')
     @classmethod

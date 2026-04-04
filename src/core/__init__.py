@@ -19,6 +19,16 @@ from .test_suite_executor import (
     TestReport,
     execute_test_suite,
 )
+from .query_engine import (
+    QueryEngine,
+    QueryEngineConfig,
+    FileStateCache,
+    PermissionDenial,
+    AbortController,
+    Usage,
+    SDKMessage,
+    SubmitOptions,
+)
 
 __all__ = [
     "RoleManager",
@@ -36,4 +46,12 @@ __all__ = [
     "ExecutionResult",
     "TestReport",
     "execute_test_suite",
+    "QueryEngine",
+    "QueryEngineConfig",
+    "FileStateCache",
+    "PermissionDenial",
+    "AbortController",
+    "Usage",
+    "SDKMessage",
+    "SubmitOptions",
 ]
