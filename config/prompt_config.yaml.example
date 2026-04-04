@@ -18,6 +18,40 @@ prompts:
   # 当技能被加载时会将此提示词注入到上下文中
   skill_loading_prompt_file: "prompts/skill_loading_prompt.txt"
   
+  # ========================================
+  # 变量配置
+  # ========================================
+  # 这些变量可以在提示词文件中通过 {{variable_name}} 语法引用
+  variables:
+    # 项目名称
+    # 用于在提示词中标识当前项目
+    project_name: "Rubato"
+    
+    # 默认浏览器
+    # 指定 Agent 在执行浏览器相关操作时使用的浏览器
+    # 可选值: chromium, firefox, webkit
+    default_browser: "chromium"
+    
+    # 默认超时时间（毫秒）
+    # 设置浏览器操作、API 请求等操作的默认超时时间
+    default_timeout: 30000
+    
+    # 不同场景示例：
+    # - Web 应用测试项目
+    # project_name: "MyWebApp"
+    # default_browser: "firefox"
+    # default_timeout: 60000
+    
+    # - API 测试项目
+    # project_name: "MyAPI"
+    # default_browser: "chromium"  # API 测试可能不需要浏览器
+    # default_timeout: 10000
+    
+    # - 快速原型项目
+    # project_name: "Prototype"
+    # default_browser: "chromium"
+    # default_timeout: 15000
+  
   # 不同场景示例：
   # - 使用自定义提示词目录
   # system_prompt_file: "custom_prompts/my_system_prompt.txt"
@@ -25,41 +59,7 @@ prompts:
   
   # - 使用绝对路径
   # system_prompt_file: "/path/to/prompts/system_prompt.txt"
-  # skill_loading_prompt_file: "/path/to/prompts/skill_loading_prompt.txt"
-
-# ========================================
-# 变量配置
-# ========================================
-# 这些变量可以在提示词文件中通过 {{variable_name}} 语法引用
-variables:
-  # 项目名称
-  # 用于在提示词中标识当前项目
-  project_name: "Rubato"
-  
-  # 默认浏览器
-  # 指定 Agent 在执行浏览器相关操作时使用的浏览器
-  # 可选值: chromium, firefox, webkit
-  default_browser: "chromium"
-  
-  # 默认超时时间（毫秒）
-  # 设置浏览器操作、API 请求等操作的默认超时时间
-  default_timeout: 30000
-  
-  # 不同场景示例：
-  # - Web 应用测试项目
-  # project_name: "MyWebApp"
-  # default_browser: "firefox"
-  # default_timeout: 60000
-  
-  # - API 测试项目
-  # project_name: "MyAPI"
-  # default_browser: "chromium"  # API 测试可能不需要浏览器
-  # default_timeout: 10000
-  
-  # - 快速原型项目
-  # project_name: "Prototype"
-  # default_browser: "chromium"
-  # default_timeout: 15000
+  # skill_loading_prompt_file: "/path/to/prompts/skill_prompt.txt"
 
 # ========================================
 # 完整配置示例
@@ -69,8 +69,7 @@ variables:
 # prompts:
 #   system_prompt_file: "prompts/system_prompt.txt"
 #   skill_loading_prompt_file: "prompts/skill_loading_prompt.txt"
-# 
-# variables:
-#   project_name: "ProductionApp"
-#   default_browser: "chromium"
-#   default_timeout: 45000
+#   variables:
+#     project_name: "ProductionApp"
+#     default_browser: "chromium"
+#     default_timeout: 45000

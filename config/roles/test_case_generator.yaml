@@ -15,8 +15,8 @@ execution:
   use_query_engine: true
   max_context_tokens: 80000
   timeout: 300
-  recursion_limit: 100
-  sub_agent_recursion_limit: 50
+  recursion_limit: 1000
+  sub_agent_recursion_limit: 500
 
 tools:
   builtin:

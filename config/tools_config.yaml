@@ -30,9 +30,9 @@ tools:
   skills:
     config_file: skills_config.yaml
     auto_load_metadata: true
-
-tool_docs:
-  auto_inject: true
-  inject_position: "after_prompt"
-  format: "markdown"
-  include_examples: true
+  
+  tool_docs:
+    auto_inject: true
+    inject_position: "after_prompt"
+    format: "markdown"
+    include_examples: true
