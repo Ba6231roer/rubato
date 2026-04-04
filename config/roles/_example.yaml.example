@@ -1,0 +1,467 @@
+# ============================================================
+# Rubato 角色配置示例文件
+# ============================================================
+# 本文件展示了角色配置的所有可用选项
+# 复制此文件并重命名为 <role_name>.yaml 来创建新角色
+# ============================================================
+
+# ====================
+# 基础信息（必填）
+# ====================
+
+# 角色名称（必填）
+# - 只能包含字母、数字、连字符和下划线
+# - 会自动转换为小写
+name: code-assistant
+
+# 角色描述（必填）
+# - 简要描述角色的用途和能力
+description: 代码助手，专注于代码编写、重构和调试
+
+# 系统提示词文件路径（必填）
+# - 相对于 prompts 目录的路径
+# - 支持的文件格式: .txt, .md
+system_prompt_file: system_prompts/code_assistant.txt
+
+# ====================
+# 模型配置
+# ====================
+model:
+  # 是否继承默认模型配置
+  # - true: 继承全局默认配置，可覆盖特定字段
+  # - false: 不继承，必须完整配置所有必需字段
+  inherit: true
+
+  # 模型提供商
+  # - openai: OpenAI GPT 系列
+  # - anthropic: Claude 系列
+  # - deepseek: DeepSeek 系列
+  # - local: 本地模型
+  # provider: openai
+
+  # 模型名称
+  # name: gpt-4-turbo-preview
+
+  # API 密钥
+  # - 支持直接填写或使用环境变量
+  # - 推荐使用环境变量: ${OPENAI_API_KEY}
+  # api_key: ${OPENAI_API_KEY}
+
+  # API 基础 URL（可选）
+  # - 用于自定义 API 端点
+  # - 适用于代理或私有部署
+  # base_url: https://api.openai.com/v1
+
+  # 温度参数（可选）
+  # - 范围: 0.0 - 1.0
+  # - 0.0: 最确定性的输出
+  # - 1.0: 最具创造性的输出
+  # temperature: 0.7
+
+  # 最大 token 数（可选）
+  # - 控制响应的最大长度
+  # max_tokens: 4096
+
+# --------------------
+# 方式一：继承默认配置（推荐）
+# --------------------
+# model:
+#   inherit: true
+#   temperature: 0.5
+
+# --------------------
+# 方式二：完全自定义配置
+# --------------------
+# model:
+#   inherit: false
+#   provider: anthropic
+#   name: claude-3-opus-20240229
+#   api_key: ${ANTHROPIC_API_KEY}
+#   temperature: 0.7
+#   max_tokens: 4096
+
+# --------------------
+# 方式三：使用本地模型
+# --------------------
+# model:
+#   inherit: false
+#   provider: local
+#   name: llama-2-70b
+#   base_url: http://localhost:8000/v1
+#   temperature: 0.8
+
+# ====================
+# 执行参数配置
+# ====================
+execution:
+  # 最大上下文 token 数
+  # - 控制对话历史的最大长度
+  # - 默认: 80000
+  max_context_tokens: 80000
+
+  # 超时时间（秒）
+  # - 单次请求的最大等待时间
+  # - 默认: 300
+  timeout: 300
+
+  # Agent 递归限制
+  # - Agent 执行步骤的最大深度
+  # - 防止无限循环
+  # - 默认: 使用全局配置
+  # recursion_limit: 100
+
+  # 子 Agent 递归限制
+  # - 子 Agent 执行步骤的最大深度
+  # - 默认: 使用全局配置
+  # sub_agent_recursion_limit: 50
+
+# ====================
+# 可用工具列表
+# ====================
+# 指定角色可以使用的工具名称列表
+# 留空表示使用默认工具集
+available_tools:
+  - read_file
+  - write_file
+  - search_code
+  - execute_shell
+
+# ====================
+# 文件工具配置
+# ====================
+file_tools:
+  # 是否启用文件工具
+  enabled: true
+
+  # 工作空间配置
+  workspace:
+    # 主工作空间路径（必填）
+    main: ./workspace
+
+    # 额外的工作空间路径
+    additional:
+      - ./shared
+      - ./templates
+
+    # 排除的路径模式
+    excluded:
+      - "**/node_modules/**"
+      - "**/.git/**"
+      - "**/__pycache__/**"
+
+  # 工作空间限制配置
+  workspace_restriction:
+    # 允许访问的子目录
+    # - 留空表示允许访问所有目录
+    allowed_subdirs:
+      - src
+      - tests
+      - docs
+
+    # 排除的文件/目录模式
+    excluded_patterns:
+      - "*.env"
+      - "*.secret"
+      - "**/secrets/**"
+
+    # 只读目录列表
+    # - 这些目录只能读取，不能修改
+    read_only_dirs:
+      - docs
+      - templates
+
+  # 权限配置
+  permissions:
+    # 默认权限模式
+    # - ask: 每次操作都需要用户确认
+    # - allow: 自动允许所有操作
+    # - deny: 自动拒绝所有操作
+    default: ask
+
+    # 自定义权限（使用 glob 模式匹配路径）
+    custom:
+      "src/**": allow
+      "tests/**": allow
+      "docs/**": allow
+      "*.md": allow
+      "*.json": ask
+      "*.yaml": ask
+      ".env": deny
+      "**/secrets/**": deny
+
+  # 是否启用审计日志
+  audit: true
+
+# --------------------
+# 文件工具简化配置
+# --------------------
+# file_tools:
+#   enabled: true
+#   permissions:
+#     default: ask
+
+# ====================
+# 工具配置
+# ====================
+tools:
+  # ====================
+  # 内置工具配置
+  # ====================
+  builtin:
+    # 是否启用内置工具
+    enabled: true
+
+    # spawn_agent 工具配置
+    # - 用于创建和管理子 Agent
+    spawn_agent:
+      enabled: true
+
+    # Shell 工具配置
+    shell_tool:
+      # 是否启用 Shell 工具
+      enabled: true
+
+      # 安全模式
+      # - true: 只允许白名单中的命令
+      # - false: 允许所有命令（不推荐）
+      safe_mode: true
+
+      # 允许的命令列表
+      # - 在安全模式下，只有列表中的命令可以执行
+      allowed_commands:
+        - git
+        - npm
+        - pip
+        - python
+        - node
+        - ls
+        - cat
+        - mkdir
+        - rm
+
+    # 文件工具配置
+    file_tools:
+      # 是否启用文件工具
+      enabled: true
+
+      # 权限模式
+      # - ask: 每次操作都需要用户确认
+      # - allow: 自动允许所有操作
+      # - deny: 自动拒绝所有操作
+      permission_mode: ask
+
+      # 工作空间配置（可选，覆盖顶层配置）
+      # workspace:
+      #   main: ./workspace
+
+      # 自定义权限（glob 模式）
+      permissions:
+        "src/**/*.py": allow
+        "tests/**/*.py": allow
+        "*.md": allow
+        "*.json": ask
+        ".env": deny
+
+      # 是否启用审计
+      audit: true
+
+  # ====================
+  # MCP 工具配置
+  # ====================
+  mcp:
+    # 是否启用 MCP 工具
+    enabled: true
+
+    # MCP 服务器列表
+    servers:
+      # Playwright 浏览器自动化服务器
+      playwright:
+        enabled: true
+        command: npx
+        args:
+          - "-y"
+          - "@playwright/mcp"
+        connection:
+          retry_times: 3
+          retry_delay: 5
+          timeout: 30
+
+      # 文件系统服务器
+      filesystem:
+        enabled: true
+        command: npx
+        args:
+          - "-y"
+          - "@modelcontextprotocol/server-filesystem"
+          - "./workspace"
+
+      # GitHub 集成服务器
+      github:
+        enabled: false
+        command: npx
+        args:
+          - "-y"
+          - "@modelcontextprotocol/server-github"
+
+  # ====================
+  # Skills 配置
+  # ====================
+  # 启用的 Skill 名称列表
+  skills:
+    - code_review
+    - test_generation
+    - documentation
+
+# --------------------
+# 工具简化配置
+# --------------------
+# tools:
+#   builtin:
+#     enabled: true
+#   mcp:
+#     enabled: false
+#   skills: []
+
+# ====================
+# 元数据配置
+# ====================
+metadata:
+  # 配置版本
+  version: "1.0.0"
+
+  # 作者信息
+  author: "Rubato Team"
+
+  # 创建时间
+  created_at: "2024-01-01"
+
+  # 最后更新时间
+  updated_at: "2024-01-15"
+
+  # 标签
+  tags:
+    - code
+    - assistant
+    - development
+
+  # 自定义字段
+  custom_field_1: "custom_value_1"
+  custom_field_2: "custom_value_2"
+
+# ============================================================
+# 完整示例：代码审查助手
+# ============================================================
+# name: code-reviewer
+# description: 专业的代码审查助手，帮助发现代码问题和改进建议
+# system_prompt_file: system_prompts/code_reviewer.txt
+# 
+# model:
+#   inherit: true
+#   temperature: 0.3
+#   max_tokens: 8000
+# 
+# execution:
+#   max_context_tokens: 100000
+#   timeout: 600
+#   recursion_limit: 50
+# 
+# available_tools:
+#   - read_file
+#   - search_code
+#   - execute_shell
+# 
+# file_tools:
+#   enabled: true
+#   workspace:
+#     main: ./workspace
+#     excluded:
+#       - "**/node_modules/**"
+#       - "**/.git/**"
+#   permissions:
+#     default: ask
+#     custom:
+#       "src/**": allow
+#       "tests/**": allow
+#   audit: true
+# 
+# tools:
+#   builtin:
+#     enabled: true
+#     spawn_agent:
+#       enabled: false
+#     shell_tool:
+#       enabled: true
+#       safe_mode: true
+#       allowed_commands:
+#         - git
+#         - npm
+#         - pip
+#     file_tools:
+#       enabled: true
+#       permission_mode: ask
+#   mcp:
+#     enabled: false
+#   skills:
+#     - code_review
+#     - security_analysis
+# 
+# metadata:
+#   version: "1.0.0"
+#   author: "Rubato Team"
+#   tags:
+#     - code-review
+#     - quality
+
+# ============================================================
+# 完整示例：文档生成助手
+# ============================================================
+# name: doc-generator
+# description: 自动生成项目文档、API 文档和使用指南
+# system_prompt_file: system_prompts/doc_generator.txt
+# 
+# model:
+#   inherit: false
+#   provider: openai
+#   name: gpt-4-turbo-preview
+#   api_key: ${OPENAI_API_KEY}
+#   temperature: 0.5
+#   max_tokens: 4096
+# 
+# execution:
+#   max_context_tokens: 80000
+#   timeout: 300
+# 
+# file_tools:
+#   enabled: true
+#   workspace:
+#     main: ./workspace
+#   workspace_restriction:
+#     allowed_subdirs:
+#       - docs
+#       - src
+#     read_only_dirs:
+#       - src
+#   permissions:
+#     default: ask
+#     custom:
+#       "docs/**": allow
+#       "README.md": allow
+#   audit: true
+# 
+# tools:
+#   builtin:
+#     enabled: true
+#     shell_tool:
+#       enabled: false
+#     file_tools:
+#       enabled: true
+#       permission_mode: ask
+#   mcp:
+#     enabled: false
+#   skills:
+#     - documentation
+#     - api_docs
+# 
+# metadata:
+#   version: "1.0.0"
+#   author: "Rubato Team"

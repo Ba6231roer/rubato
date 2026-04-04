@@ -1,0 +1,184 @@
+# ========================================
+# Skills 配置示例文件
+# ========================================
+# 本文件展示了 SkillsConfig 的完整配置选项
+# 复制此文件为 skills_config.yaml 并根据实际需求修改
+
+# ========================================
+# Skills 配置
+# ========================================
+skills:
+  # 技能目录路径
+  # 存放技能定义文件（.md 文件）的目录
+  # 支持相对路径（相对于项目根目录）或绝对路径
+  directory: "skills"
+  
+  # 不同场景示例：
+  # - 使用自定义技能目录
+  # directory: "custom_skills"
+  
+  # - 使用绝对路径
+  # directory: "/home/user/skills"
+  
+  # - 使用多级目录
+  # directory: "config/skills/active"
+
+  # ========================================
+  # 自动加载配置
+  # ========================================
+  # 是否在启动时自动加载所有技能
+  auto_load: true
+  
+  # 不同场景示例：
+  # - 禁用自动加载（手动管理技能）
+  # auto_load: false
+  
+  # - 启用自动加载（推荐用于开发环境）
+  # auto_load: true
+
+  # ========================================
+  # 启用的技能列表
+  # ========================================
+  # 指定要启用的技能名称列表
+  # 技能名称对应技能文件名（不含 .md 扩展名）
+  # 如果 auto_load 为 true，此列表用于筛选要加载的技能
+  # 如果 auto_load 为 false，只加载此列表中的技能
+  enabled_skills:
+    - test-execution      # 测试执行技能
+    - playwright-cli      # Playwright CLI 技能
+    - knowledge-query     # 知识库查询技能
+  
+  # 不同场景示例：
+  # - Web 测试项目
+  # enabled_skills:
+  #   - test-execution
+  #   - playwright-cli
+  #   - browser-automation
+  
+  # - API 测试项目
+  # enabled_skills:
+  #   - api-testing
+  #   - data-validation
+  #   - knowledge-query
+  
+  # - 文档生成项目
+  # enabled_skills:
+  #   - doc-generator
+  #   - code-analyzer
+  #   - markdown-writer
+  
+  # - 空列表（不启用任何技能）
+  # enabled_skills: []
+  
+  # - 启用所有技能（仅在 auto_load: true 时有效）
+  # enabled_skills: []  # 空列表 + auto_load: true = 加载所有技能
+
+  # ========================================
+  # 技能加载配置
+  # ========================================
+  skill_loading:
+    # 是否启用触发器匹配
+    # 启用后，系统会根据用户输入自动匹配并加载相关技能
+    # 触发器定义在技能文件的 frontmatter 中
+    trigger_matching: true
+    
+    # 不同场景示例：
+    # - 启用智能匹配（推荐）
+    # trigger_matching: true
+    
+    # - 禁用智能匹配（手动控制）
+    # trigger_matching: false
+    
+    # 最大已加载技能数量
+    # 限制同时加载的技能数量，避免上下文过大
+    # 当达到上限时，会卸载最久未使用的技能
+    max_loaded_skills: 3
+    
+    # 不同场景示例：
+    # - 单技能场景
+    # max_loaded_skills: 1
+    
+    # - 多技能协作场景
+    # max_loaded_skills: 5
+    
+    # - 无限制（不推荐，可能导致上下文过大）
+    # max_loaded_skills: 10
+
+# ========================================
+# 完整配置示例
+# ========================================
+
+# 示例 1: Web 自动化测试项目
+# skills:
+#   directory: "skills"
+#   auto_load: true
+#   enabled_skills:
+#     - test-execution
+#     - playwright-cli
+#     - browser-automation
+#     - screenshot-analyzer
+#   skill_loading:
+#     trigger_matching: true
+#     max_loaded_skills: 4
+
+# 示例 2: API 测试项目
+# skills:
+#   directory: "skills/api"
+#   auto_load: true
+#   enabled_skills:
+#     - api-testing
+#     - data-validation
+#     - response-analyzer
+#   skill_loading:
+#     trigger_matching: true
+#     max_loaded_skills: 3
+
+# 示例 3: 文档生成项目
+# skills:
+#   directory: "skills/docs"
+#   auto_load: false
+#   enabled_skills:
+#     - doc-generator
+#     - code-analyzer
+#   skill_loading:
+#     trigger_matching: false
+#     max_loaded_skills: 2
+
+# 示例 4: 开发环境（启用所有技能）
+# skills:
+#   directory: "skills"
+#   auto_load: true
+#   enabled_skills: []  # 空列表表示加载所有技能
+#   skill_loading:
+#     trigger_matching: true
+#     max_loaded_skills: 5
+
+# 示例 5: 生产环境（最小化配置）
+# skills:
+#   directory: "skills"
+#   auto_load: false
+#   enabled_skills:
+#     - test-execution
+#   skill_loading:
+#     trigger_matching: false
+#     max_loaded_skills: 1
+
+# ========================================
+# 技能文件格式说明
+# ========================================
+# 技能文件应放置在指定的 directory 目录中
+# 文件格式为 Markdown (.md)，包含 frontmatter 元数据
+# 
+# 示例技能文件结构：
+# ---
+# name: test-execution
+# description: 执行测试用例并生成报告
+# triggers:
+#   - "执行测试"
+#   - "运行测试"
+#   - "test"
+# ---
+# 
+# # Test Execution Skill
+# 
+# 此技能用于执行测试用例...

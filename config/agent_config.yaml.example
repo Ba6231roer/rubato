@@ -1,0 +1,156 @@
+# ============================================================
+# Agent 配置示例文件
+# ============================================================
+# 本文件包含 Agent 运行时的各项配置参数
+# 复制此文件为 agent_config.yaml 并根据需要修改
+
+# ============================================================
+# 上下文配置
+# ============================================================
+# Agent 最大上下文 token 数量
+# - 决定了 Agent 能够处理的最大上下文窗口大小
+# - 超过此限制时将触发消息压缩机制
+# - 建议值：80000（适用于大多数 LLM）
+# max_context_tokens: 80000
+
+# ============================================================
+# 消息压缩配置
+# ============================================================
+message_compression:
+  # 是否启用消息压缩功能
+  # - 当上下文接近 max_context_tokens 时自动压缩历史消息
+  # - 建议保持启用以避免超出 token 限制
+  enabled: true
+
+  # 压缩后允许的最大 token 数量
+  # - 压缩后的消息总长度不会超过此值
+  # - 需要小于 max_context_tokens
+  max_tokens: 50000
+
+  # 保留最近 N 条消息不压缩
+  # - 这些消息将保持原样，确保最近上下文的完整性
+  # - 建议值：6（保留最近 3 轮对话）
+  keep_recent: 6
+
+  # 消息摘要的最大长度（字符数）
+  # - 压缩时生成摘要的最大字符数
+  # - 较长的摘要保留更多细节，但占用更多 token
+  summary_max_length: 300
+
+  # 历史消息摘要数量
+  # - 每次压缩时处理的最近消息数量
+  # - 用于生成压缩摘要的历史窗口大小
+  history_summary_count: 10
+
+# ============================================================
+# 执行参数配置
+# ============================================================
+execution:
+  # Agent 递归调用限制
+  # - 防止无限递归导致资源耗尽
+  # - 当 Agent 调用链达到此深度时将停止
+  # - 建议值：100
+  recursion_limit: 100
+
+  # 子 Agent 递归调用限制
+  # - 子 Agent（spawn_agent 创建）的最大递归深度
+  # - 通常设置为主 Agent 限制的一半
+  # - 建议值：50
+  sub_agent_recursion_limit: 50
+
+  # 默认超时时间（秒）
+  # - 单个操作的最大执行时间
+  # - 超过此时间将中断操作并报错
+  # - 建议值：300（5分钟）
+  default_timeout: 300
+
+# ============================================================
+# 日志配置
+# ============================================================
+logging:
+  # 是否记录 token 估算信息
+  # - 记录每次操作的 token 使用估算
+  # - 有助于监控资源使用情况
+  log_token_estimation: true
+
+  # 是否记录压缩统计信息
+  # - 记录消息压缩前后的 token 数量变化
+  # - 有助于评估压缩效果
+  log_compression_stats: true
+
+  # 是否记录步骤详情
+  # - 记录 Agent 每个执行步骤的详细信息
+  # - 有助于调试和分析 Agent 行为
+  log_step_details: true
+
+# ============================================================
+# 配置场景示例
+# ============================================================
+
+# --- 场景1：轻量级配置（适合简单任务） ---
+# max_context_tokens: 40000
+# message_compression:
+#   enabled: true
+#   max_tokens: 25000
+#   keep_recent: 4
+#   summary_max_length: 200
+#   history_summary_count: 6
+# execution:
+#   recursion_limit: 50
+#   sub_agent_recursion_limit: 25
+#   default_timeout: 180
+# logging:
+#   log_token_estimation: true
+#   log_compression_stats: false
+#   log_step_details: false
+
+# --- 场景2：高性能配置（适合复杂任务） ---
+# max_context_tokens: 120000
+# message_compression:
+#   enabled: true
+#   max_tokens: 80000
+#   keep_recent: 10
+#   summary_max_length: 500
+#   history_summary_count: 15
+# execution:
+#   recursion_limit: 150
+#   sub_agent_recursion_limit: 75
+#   default_timeout: 600
+# logging:
+#   log_token_estimation: true
+#   log_compression_stats: true
+#   log_step_details: true
+
+# --- 场景3：调试配置（适合开发调试） ---
+# max_context_tokens: 80000
+# message_compression:
+#   enabled: false
+#   max_tokens: 50000
+#   keep_recent: 6
+#   summary_max_length: 300
+#   history_summary_count: 10
+# execution:
+#   recursion_limit: 100
+#   sub_agent_recursion_limit: 50
+#   default_timeout: 300
+# logging:
+#   log_token_estimation: true
+#   log_compression_stats: true
+#   log_step_details: true
+
+# --- 场景4：生产环境配置（适合稳定运行） ---
+# max_context_tokens: 80000
+# message_compression:
+#   enabled: true
+#   max_tokens: 50000
+#   keep_recent: 6
+#   summary_max_length: 300
+#   history_summary_count: 10
+# execution:
+#   recursion_limit: 100
+#   sub_agent_recursion_limit: 50
+#   default_timeout: 300
+# logging:
+#   log_token_estimation: false
+#   log_compression_stats: false
+#   log_step_details: false
