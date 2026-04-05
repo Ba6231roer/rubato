@@ -173,6 +173,8 @@ class SubAgentManager:
         self.parent_agent = parent_agent
         self.sub_agents_dir = Path(sub_agents_dir)
         self.roles_dir = Path(roles_dir)
+        if not self.roles_dir.is_absolute():
+            self.roles_dir = Path.cwd() / self.roles_dir
         self.recursion_limit = recursion_limit
         
         self.agent_definitions: Dict[str, SubAgentDefinition] = {}
@@ -331,7 +333,7 @@ class SubAgentManager:
         
         tools = self._resolve_tools(definition)
         
-        system_prompt = self._build_system_prompt(definition, tools)
+        system_prompt = await self._build_system_prompt(definition, tools)
         
         llm = self._create_llm(definition)
         
@@ -408,7 +410,7 @@ class SubAgentManager:
         
         优先级：
         1. 预定义的 SubAgent 定义
-        2. 角色配置文件
+        2. 角色配置文件（尝试多种命名格式）
         3. 默认定义
         
         Args:
@@ -420,9 +422,27 @@ class SubAgentManager:
         if role_name in self.agent_definitions:
             return self.agent_definitions[role_name]
         
-        role_config_path = self.roles_dir / f"{role_name}.yaml"
-        if role_config_path.exists():
-            return self._convert_role_config_to_definition(role_config_path)
+        possible_filenames = [
+            f"{role_name}.yaml",
+            f"{role_name.replace('-', '_')}.yaml",
+            f"{role_name.replace('_', '-')}.yaml",
+        ]
+        
+        for filename in possible_filenames:
+            role_config_path = self.roles_dir / filename
+            if role_config_path.exists():
+                self._logger.log_agent_action("sub_agent_role_definition_found", {
+                    "role_name": role_name,
+                    "filename": filename,
+                    "role_config_path": str(role_config_path)
+                })
+                return self._convert_role_config_to_definition(role_config_path)
+        
+        self._logger.log_agent_action("sub_agent_role_definition_not_found", {
+            "role_name": role_name,
+            "roles_dir": str(self.roles_dir),
+            "tried_filenames": possible_filenames
+        })
         
         return SubAgentDefinition(
             name=role_name,
@@ -453,24 +473,73 @@ class SubAgentManager:
         
         system_prompt = ""
         if role_config.system_prompt_file:
-            prompt_path = self.roles_dir.parent / role_config.system_prompt_file
+            prompt_path = Path(role_config.system_prompt_file)
+            if not prompt_path.is_absolute():
+                prompt_path = Path.cwd() / prompt_path
+            
+            self._logger.log_agent_action("sub_agent_system_prompt_file_loading", {
+                "role_name": role_config.name,
+                "system_prompt_file": role_config.system_prompt_file,
+                "resolved_path": str(prompt_path)
+            })
+            
             if prompt_path.exists():
-                system_prompt = prompt_path.read_text(encoding='utf-8')
+                try:
+                    system_prompt = prompt_path.read_text(encoding='utf-8')
+                    self._logger.log_agent_action("sub_agent_system_prompt_file_loaded", {
+                        "role_name": role_config.name,
+                        "prompt_length": len(system_prompt),
+                        "prompt_preview": system_prompt[:100] + "..." if len(system_prompt) > 100 else system_prompt
+                    })
+                except Exception as e:
+                    self._logger.log_agent_action("sub_agent_system_prompt_file_load_error", {
+                        "role_name": role_config.name,
+                        "error": str(e)
+                    })
+            else:
+                self._logger.log_agent_action("sub_agent_system_prompt_file_not_found", {
+                    "role_name": role_config.name,
+                    "prompt_path": str(prompt_path)
+                })
         
         available_tools = role_config.available_tools or []
+        
+        skills: List[str] = []
+        if role_config.tools and role_config.tools.skills:
+            skills = role_config.tools.skills
+        
+        model_config = SubAgentModelConfig(inherit=True)
+        if role_config.model:
+            model_config = SubAgentModelConfig(
+                inherit=role_config.model.inherit,
+                provider=role_config.model.provider,
+                name=role_config.model.name,
+                api_key=role_config.model.api_key,
+                base_url=role_config.model.base_url,
+                temperature=role_config.model.temperature,
+                max_tokens=role_config.model.max_tokens
+            )
+        
+        self._logger.log_agent_action("sub_agent_config_converted", {
+            "role_name": role_config.name,
+            "skills": skills,
+            "available_tools": available_tools[:5] if available_tools else [],
+            "model_inherit": model_config.inherit
+        })
         
         return SubAgentDefinition(
             name=role_config.name,
             description=role_config.description or "",
             system_prompt=system_prompt,
-            model=SubAgentModelConfig(inherit=True),
+            model=model_config,
             execution=SubAgentExecutionConfig(
                 timeout=role_config.execution.timeout if role_config.execution else 300,
                 recursion_limit=role_config.execution.recursion_limit if role_config.execution else self.recursion_limit,
                 use_query_engine=role_config.execution.use_query_engine if role_config.execution else False
             ),
             tool_inheritance=ToolInheritanceMode.INHERIT_SELECTED,
-            available_tools=available_tools if available_tools else None
+            available_tools=available_tools if available_tools else None,
+            skills=skills if skills else None
         )
     
     def _resolve_tools(self, definition: SubAgentDefinition) -> List[BaseTool]:
@@ -512,7 +581,7 @@ class SubAgentManager:
         
         return tools
     
-    def _build_system_prompt(
+    async def _build_system_prompt(
         self, 
         definition: SubAgentDefinition, 
         tools: List[BaseTool]
@@ -528,17 +597,65 @@ class SubAgentManager:
         """
         base_prompt = definition.get_system_prompt_content(self.sub_agents_dir)
         
-        tool_docs = self._generate_tool_docs_for_sub_agent(tools)
-        if tool_docs:
-            return f"{base_prompt}\n\n{tool_docs}"
+        skills_content = await self._load_skills_content(definition.skills)
         
-        return base_prompt
+        tool_docs = self._generate_tool_docs_for_sub_agent(tools, definition.skills)
+        
+        parts = [base_prompt]
+        if skills_content:
+            parts.append(f"\n\n# 可用技能\n\n{skills_content}")
+        if tool_docs:
+            parts.append(f"\n\n{tool_docs}")
+        
+        final_prompt = "\n\n".join(parts)
+        
+        self._logger.log_agent_action("sub_agent_system_prompt_built", {
+            "skills": definition.skills,
+            "skills_loaded": bool(skills_content),
+            "prompt_length": len(final_prompt)
+        })
+        
+        return final_prompt
     
-    def _generate_tool_docs_for_sub_agent(self, tools: List[BaseTool]) -> str:
+    async def _load_skills_content(self, skills: Optional[List[str]]) -> str:
+        """加载 skills 内容
+        
+        Args:
+            skills: skills 名称列表
+            
+        Returns:
+            skills 内容字符串
+        """
+        if not skills:
+            return ""
+        
+        if hasattr(self.parent_agent, 'skill_loader') and self.parent_agent.skill_loader:
+            contents = []
+            for skill_name in skills:
+                try:
+                    content = await self.parent_agent.skill_loader.load_full_skill(skill_name)
+                    if content:
+                        contents.append(f"## {skill_name}\n\n{content}")
+                        self._logger.log_agent_action("sub_agent_skill_loaded", {
+                            "skill_name": skill_name,
+                            "content_length": len(content)
+                        })
+                except Exception as e:
+                    self._logger.log_error(f"load_skill_{skill_name}", e)
+            return "\n\n".join(contents)
+        
+        return ""
+    
+    def _generate_tool_docs_for_sub_agent(
+        self, 
+        tools: List[BaseTool],
+        skills: Optional[List[str]] = None
+    ) -> str:
         """为 SubAgent 生成工具说明文档
         
         Args:
             tools: 工具列表
+            skills: skills 列表
             
         Returns:
             工具说明文档
@@ -561,10 +678,26 @@ class SubAgentManager:
                     "parameters": []
                 })
         
+        skills_metadata = []
+        if skills and hasattr(self.parent_agent, 'skill_loader') and self.parent_agent.skill_loader:
+            try:
+                skill_metadata_dict = self.parent_agent.skill_loader.get_all_skill_metadata()
+                for skill_name in skills:
+                    if skill_name in skill_metadata_dict:
+                        meta = skill_metadata_dict[skill_name]
+                        skills_metadata.append({
+                            "name": skill_name,
+                            "description": meta.get("description", ""),
+                            "triggers": meta.get("triggers", []),
+                            "required_tools": meta.get("required_tools", [])
+                        })
+            except Exception as e:
+                self._logger.log_error("get_skill_metadata", e)
+        
         return generate_tool_docs_for_prompt(
             builtin_tools=builtin_tools,
             mcp_tools=mcp_tools,
-            skills=None,
+            skills=skills_metadata,
             include_examples=True
         )
     
@@ -647,6 +780,15 @@ class SubAgentManager:
             "recursion_limit": definition.execution.recursion_limit,
             "session_id": session_id
         })
+        
+        messages_for_log = []
+        system_prompt_content = definition.get_system_prompt_content(self.sub_agents_dir)
+        if system_prompt_content:
+            messages_for_log.append(SystemMessage(content=system_prompt_content[:500] + "..." if len(system_prompt_content) > 500 else system_prompt_content))
+        messages_for_log.append(HumanMessage(content=task))
+        
+        model_name = self.llm.model_name if hasattr(self.llm, 'model_name') else 'unknown'
+        self._logger.log_request(messages_for_log, model_name)
         
         last_error = None
         for attempt in range(definition.execution.max_retries + 1):

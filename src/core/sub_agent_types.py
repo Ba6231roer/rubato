@@ -180,6 +180,10 @@ class SubAgentDefinition(BaseModel):
         default=None,
         description="可用工具列表（当 tool_inheritance=INDEPENDENT 时使用）"
     )
+    skills: Optional[List[str]] = Field(
+        default=None,
+        description="Skills 列表（从角色配置继承）"
+    )
     
     metadata: Dict[str, Any] = Field(
         default_factory=dict,

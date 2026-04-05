@@ -146,7 +146,8 @@ class RubatoAgent:
         context_manager: ContextManager,
         tool_registry: ToolRegistry,
         mcp_manager = None,
-        role_config: Optional[RoleConfig] = None
+        role_config: Optional[RoleConfig] = None,
+        roles_dir: str = "config/roles"
     ):
         self.config = config
         self.skill_loader = skill_loader
@@ -154,6 +155,7 @@ class RubatoAgent:
         self.tool_registry = tool_registry
         self.mcp_manager = mcp_manager
         self.role_config = role_config
+        self.roles_dir = roles_dir
         self.logger = get_llm_logger()
         
         self.logging_config = config.agent.logging
@@ -193,6 +195,7 @@ class RubatoAgent:
             llm=self.llm,
             parent_agent=self,
             sub_agents_dir="sub_agents",
+            roles_dir=self.roles_dir,
             recursion_limit=sub_agent_recursion_limit
         )
         

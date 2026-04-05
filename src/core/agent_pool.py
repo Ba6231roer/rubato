@@ -208,10 +208,41 @@ class AgentPool:
         if role_config and role_config.tools:
             return self._convert_role_tools_to_unified(role_config.tools)
         
+        if role_config and role_config.available_tools:
+            return self._convert_available_tools_to_unified(role_config.available_tools)
+        
         if self.config.tools:
             return self.config.tools
         
         return None
+    
+    def _convert_available_tools_to_unified(self, available_tools: List[str]) -> UnifiedToolsConfig:
+        from ..config.models import (
+            UnifiedToolsConfig, BuiltinToolsConfig, MCPToolsConfig, 
+            SkillsToolsConfig, ToolDocsConfig, FileToolsSubConfig,
+            SpawnAgentConfig, ShellToolConfig
+        )
+        
+        builtin_names = {'spawn_agent', 'shell_tool', 'file_read', 'file_write', 
+                        'file_list', 'file_search', 'file_exists', 'file_mkdir', 
+                        'file_replace', 'file_delete', 'file_copy', 'file_move', 'terminal'}
+        
+        has_spawn_agent = 'spawn_agent' in available_tools
+        has_shell_tool = 'shell_tool' in available_tools
+        has_file_tools = any(t in available_tools for t in ['file_read', 'file_write', 'file_list', 'file_exists'])
+        has_mcp = any(t not in builtin_names for t in available_tools)
+        
+        return UnifiedToolsConfig(
+            builtin=BuiltinToolsConfig(
+                enabled=True,
+                spawn_agent=SpawnAgentConfig(enabled=has_spawn_agent),
+                shell_tool=ShellToolConfig(enabled=has_shell_tool),
+                file_tools=FileToolsSubConfig(enabled=has_file_tools)
+            ),
+            mcp=MCPToolsConfig(auto_connect=has_mcp),
+            skills=SkillsToolsConfig(),
+            tool_docs=ToolDocsConfig()
+        )
     
     def _convert_role_tools_to_unified(self, role_tools) -> Optional[UnifiedToolsConfig]:
         from ..config.models import (
@@ -242,6 +273,12 @@ class AgentPool:
                 )
         
         skills_list = role_tools.skills if role_tools.skills else []
+        
+        self._logger.log_agent_action("role_tools_converted", {
+            "skills": skills_list,
+            "builtin_enabled": builtin_config.enabled,
+            "mcp_auto_connect": mcp_config.auto_connect
+        })
         
         return UnifiedToolsConfig(
             builtin=builtin_config,
@@ -398,7 +435,8 @@ class AgentPool:
             skill_loader=skill_loader,
             context_manager=context_manager,
             tool_registry=tool_registry,
-            role_config=role_config
+            role_config=role_config,
+            roles_dir=self.roles_dir
         )
 
         inst_id = instance_id or str(uuid.uuid4())
