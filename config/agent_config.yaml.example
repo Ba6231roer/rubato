@@ -83,6 +83,18 @@ logging:
   # - 有助于调试和分析 Agent 行为
   log_step_details: true
 
+  # 日志格式
+  # - compact: 紧凑模式，使用键值对格式，减少每个日志占用的行数
+  # - detailed: 详细模式，使用 JSON 格式，保留完整结构信息
+  # - 建议值：compact（便于快速浏览）
+  log_format: compact
+
+  # 工具日志模式
+  # - summary: 摘要模式，工具列表以摘要形式显示
+  # - detailed: 详细模式，打印完整的工具定义信息
+  # - 建议值：summary（减少日志冗余）
+  tool_log_mode: summary
+
 # ============================================================
 # 配置场景示例
 # ============================================================
@@ -103,6 +115,8 @@ logging:
 #   log_token_estimation: true
 #   log_compression_stats: false
 #   log_step_details: false
+#   log_format: compact
+#   tool_log_mode: summary
 
 # --- 场景2：高性能配置（适合复杂任务） ---
 # max_context_tokens: 120000
@@ -120,6 +134,8 @@ logging:
 #   log_token_estimation: true
 #   log_compression_stats: true
 #   log_step_details: true
+#   log_format: compact
+#   tool_log_mode: summary
 
 # --- 场景3：调试配置（适合开发调试） ---
 # max_context_tokens: 80000
@@ -137,6 +153,8 @@ logging:
 #   log_token_estimation: true
 #   log_compression_stats: true
 #   log_step_details: true
+#   log_format: detailed
+#   tool_log_mode: detailed
 
 # --- 场景4：生产环境配置（适合稳定运行） ---
 # max_context_tokens: 80000
@@ -154,3 +172,5 @@ logging:
 #   log_token_estimation: false
 #   log_compression_stats: false
 #   log_step_details: false
+#   log_format: compact
+#   tool_log_mode: summary

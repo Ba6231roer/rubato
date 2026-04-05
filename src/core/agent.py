@@ -156,6 +156,10 @@ class RubatoAgent:
         self.role_config = role_config
         self.logger = get_llm_logger()
         
+        self.logging_config = config.agent.logging
+        self.logger.set_log_format(self.logging_config.log_format)
+        self.logger.set_tool_log_mode(self.logging_config.tool_log_mode)
+        
         self.llm = self._create_llm()
         self._current_system_prompt = self._load_system_prompt()
         
@@ -172,7 +176,6 @@ class RubatoAgent:
         )
         
         self.compression_config = config.agent.message_compression
-        self.logging_config = config.agent.logging
         
         sub_agent_recursion_limit = (
             role_config.execution.sub_agent_recursion_limit
@@ -218,6 +221,16 @@ class RubatoAgent:
             "compression_enabled": self.compression_config.enabled,
             "use_query_engine": self.use_query_engine
         })
+    
+    def get_role_name(self) -> str:
+        """获取当前角色名称
+        
+        Returns:
+            角色名称，如果没有配置角色则返回 'default'
+        """
+        if self.role_config and hasattr(self.role_config, 'name'):
+            return self.role_config.name
+        return "default"
     
     def _create_agent(self, system_prompt: str):
         """创建Agent实例"""
@@ -484,6 +497,8 @@ class RubatoAgent:
     
     async def run(self, user_input: str) -> str:
         """运行Agent，使用流式处理记录每个步骤"""
+        role_name = self.get_role_name()
+        self.logger.set_role_context(role_name)
         self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
         
         file_paths = self._extract_file_paths_from_input(user_input)
@@ -674,6 +689,8 @@ class RubatoAgent:
     
     async def run_stream(self, user_input: str):
         """运行Agent，流式返回响应内容（用于WebSocket）"""
+        role_name = self.get_role_name()
+        self.logger.set_role_context(role_name)
         self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
         
         file_paths = self._extract_file_paths_from_input(user_input)

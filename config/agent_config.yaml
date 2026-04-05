@@ -17,3 +17,7 @@ agent:
     log_token_estimation: true
     log_compression_stats: true
     log_step_details: true
+    log_format: compact
+    tool_log_mode: summary
+
+

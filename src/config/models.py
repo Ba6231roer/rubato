@@ -355,6 +355,8 @@ class AgentLoggingConfig(BaseModel):
     log_token_estimation: bool = True
     log_compression_stats: bool = True
     log_step_details: bool = True
+    log_format: str = "compact"
+    tool_log_mode: str = "summary"
 
 
 class AgentConfig(BaseModel):

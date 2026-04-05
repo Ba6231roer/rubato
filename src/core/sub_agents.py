@@ -280,6 +280,9 @@ class SubAgentManager:
         Returns:
             执行结果
         """
+        parent_role = self.parent_agent.get_role_name() if hasattr(self.parent_agent, 'get_role_name') else 'unknown'
+        self._logger.set_role_context(options.agent_name, parent_role=parent_role)
+        
         if options.session_id:
             if not self.check_recursion_depth(options.session_id, options.max_recursion_depth):
                 return f"错误：已达到最大递归深度限制（{options.max_recursion_depth}），无法创建更多子智能体"
@@ -302,6 +305,7 @@ class SubAgentManager:
             return f"错误：SubAgent 执行失败 - {str(e)}"
         
         finally:
+            self._logger.clear_role_context()
             if options.session_id:
                 self.decrement_depth(options.session_id)
     
