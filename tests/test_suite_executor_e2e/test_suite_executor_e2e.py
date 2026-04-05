@@ -48,11 +48,11 @@ class TestSuiteExecutorE2E:
             env["PYTHONPATH"] = str(self.project_root)
             
             self.server_process = subprocess.Popen(
-                [str(self.venv_python), "-m", "src.main", "--web", "--port", "8000"],
+                [str(self.venv_python), "-u", "-m", "src.main", "--web", "--port", "8000"],
                 cwd=str(self.project_root),
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 text=True
             )
             
@@ -97,7 +97,7 @@ class TestSuiteExecutorE2E:
             except Exception as e:
                 self.log(f"停止服务失败: {e}", "ERROR")
     
-    async def send_command(self, websocket, command: str) -> dict:
+    async def send_command(self, websocket, command: str, timeout: int = 120) -> dict:
         """发送命令并等待响应"""
         self.log(f"发送命令: {command}")
         
@@ -108,11 +108,18 @@ class TestSuiteExecutorE2E:
         
         await websocket.send(json.dumps(message))
         
-        response = await websocket.recv()
-        data = json.loads(response)
-        
-        self.log(f"收到响应: {data.get('type')}")
-        return data
+        try:
+            response = await asyncio.wait_for(
+                websocket.recv(),
+                timeout=timeout
+            )
+            data = json.loads(response)
+            
+            self.log(f"收到响应: {data.get('type')}")
+            return data
+        except asyncio.TimeoutError:
+            self.log(f"命令响应超时 ({timeout} 秒)", "ERROR")
+            return {"type": "error", "content": f"命令响应超时 ({timeout} 秒)"}
     
     async def send_task(self, websocket, task: str, timeout: int = 600) -> str:
         """发送任务并收集完整响应，增加超时时间到 10 分钟"""
@@ -212,8 +219,15 @@ class TestSuiteExecutorE2E:
                     self.log("角色切换失败", "ERROR")
                     return False
                 
-                role_info = result.get("content", {})
-                self.log(f"角色切换成功: {role_info.get('role_name', 'unknown')}")
+                if result.get("type") == "command_result":
+                    content = result.get("content", {})
+                    if content.get("type") == "ERROR":
+                        self.log(f"角色切换失败: {content.get('message')}", "ERROR")
+                        return False
+                    role_data = content.get("data", {})
+                    self.log(f"角色切换成功: {role_data.get('role', 'unknown')}")
+                else:
+                    self.log(f"收到未知响应类型: {result.get('type')}", "WARNING")
                 
                 await asyncio.sleep(2)
                 
@@ -236,7 +250,7 @@ class TestSuiteExecutorE2E:
                 self.log("=" * 80)
                 
                 for check, passed in validation_results.items():
-                    status = "✓ 通过" if passed else "✗ 失败"
+                    status = "[PASS]" if passed else "[FAIL]"
                     self.log(f"{status} - {check}")
                 
                 all_passed = all(validation_results.values())

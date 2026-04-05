@@ -202,7 +202,7 @@ class LLMLogger:
                 return f"{s[:max_len]}..."
             return s
     
-    def _format_list(self, items: list, key: str, max_items: int = 3) -> str:
+    def _format_list(self, items: list, key: str, max_items: int = 5) -> str:
         """格式化列表，支持截断
         
         Args:
