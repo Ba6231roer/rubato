@@ -5,6 +5,7 @@ QueryEngine 核心类实现
 """
 
 import asyncio
+import os
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -22,6 +23,8 @@ from typing import (
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
+from ..context.compressor import ContextCompressor
+from ..context.tool_result_storage import ToolResultStorage, ContentReplacementState
 from ..skills.parser import SkillMetadata
 from ..utils.logger import get_llm_logger
 from .llm_wrapper import LLMCaller
@@ -186,6 +189,14 @@ class QueryEngineConfig:
     model_name: Optional[str] = None
     temperature: float = 0.7
     max_tokens: Optional[int] = None
+    compression_enabled: bool = True
+    max_context_tokens: int = 80000
+    autocompact_buffer_tokens: int = 13000
+    keep_recent: int = 6
+    snip_keep_recent: int = 6
+    tool_result_persist_threshold: int = 50000
+    tool_result_budget_per_message: int = 200000
+    max_consecutive_failures: int = 3
 
 
 class QueryEngine:
@@ -205,18 +216,44 @@ class QueryEngine:
         self.logger = get_llm_logger()
         
         # 创建 LLMCaller，传递 logger 和 timeout
-        timeout = config.max_budget_usd or 300.0  # 默认 300 秒超时
+        timeout = config.max_budget_usd or 300.0
         self.llm_caller = LLMCaller(
             llm=config.llm,
             tools=config.tools,
             system_prompt=config.custom_system_prompt,
             logger=self.logger,
-            timeout=timeout
+            timeout=timeout,
+            max_context_tokens=config.max_context_tokens
         )
         
         self._tool_map: Dict[str, BaseTool] = {
             tool.name: tool for tool in config.tools
         }
+
+        self._compression_enabled = config.compression_enabled
+        if self._compression_enabled:
+            session_dir = os.path.join(config.cwd, ".rubato", "sessions", self._session_id)
+            self._tool_result_storage = ToolResultStorage(
+                session_dir=session_dir,
+                persist_threshold=config.tool_result_persist_threshold,
+                message_budget=config.tool_result_budget_per_message,
+            )
+            self._content_replacement_state = ContentReplacementState()
+            self._compressor = ContextCompressor(
+                llm_caller=self.llm_caller,
+                max_context_tokens=config.max_context_tokens,
+                autocompact_buffer_tokens=config.autocompact_buffer_tokens,
+                keep_recent=config.keep_recent,
+                snip_keep_recent=config.snip_keep_recent,
+                max_consecutive_failures=config.max_consecutive_failures,
+                tool_result_storage=self._tool_result_storage,
+                content_replacement_state=self._content_replacement_state,
+                logger=self.logger,
+            )
+        else:
+            self._tool_result_storage = None
+            self._content_replacement_state = None
+            self._compressor = None
     
     async def submit_message(
         self,
@@ -334,6 +371,23 @@ class QueryEngine:
                 "max_turns": self.config.max_turns,
                 "message_count": len(self.mutable_messages)
             })
+
+            if self._compressor is not None:
+                estimated_tokens = self._compressor.estimate_tokens(self.mutable_messages)
+                warning_state = self._compressor.calculate_token_warning_state(estimated_tokens)
+                self.logger.log_agent_action("token_estimation", {
+                    "session_id": self._session_id,
+                    "turn": self._current_turn,
+                    "estimated_tokens": estimated_tokens,
+                    "warning_state": warning_state,
+                })
+
+            if self._check_blocking_limit():
+                yield SDKMessage.error(
+                    message="上下文已达到阻塞限制，请开始新对话或清理上下文",
+                    error_type="blocking_limit_reached"
+                )
+                break
             
             yield SDKMessage.assistant(
                 content="",
@@ -554,6 +608,42 @@ class QueryEngine:
         if self.config.max_turns is None:
             return False
         return self._current_turn >= self.config.max_turns
+
+    def _check_blocking_limit(self) -> bool:
+        if self._compressor is None:
+            return False
+        estimated_tokens = self._compressor.estimate_tokens(self.mutable_messages)
+        warning_state = self._compressor.calculate_token_warning_state(estimated_tokens)
+        return warning_state.get("is_at_blocking_limit", False)
+
+    def _handle_compact_boundary(self) -> None:
+        if self._compressor is None:
+            return
+        boundary_idx = -1
+        for i, msg in enumerate(self.mutable_messages):
+            if isinstance(msg, SystemMessage) and isinstance(msg.content, str) and msg.content.startswith("[compact_boundary]"):
+                boundary_idx = i
+        if boundary_idx >= 0:
+            self.mutable_messages = self.mutable_messages[boundary_idx:]
+
+    def _restore_post_compact_context(self) -> None:
+        if self._compressor is None or self._tool_result_storage is None:
+            return
+        if self.read_file_state and self.read_file_state.cache:
+            attachment_parts = []
+            for file_path, state in list(self.read_file_state.cache.items())[-5:]:
+                content = state.get("content", "")
+                if content:
+                    estimated_tokens = len(content) // 4
+                    if estimated_tokens <= 5000:
+                        attachment_parts.append(f"File: {file_path}\n{content[:20000]}")
+            if attachment_parts:
+                total_tokens = sum(len(p) // 4 for p in attachment_parts)
+                if total_tokens <= 50000:
+                    attachment_msg = HumanMessage(
+                        content="[Post-compact file context]\n" + "\n---\n".join(attachment_parts)
+                    )
+                    self.mutable_messages.append(attachment_msg)
     
     def _get_final_result(self) -> str:
         """获取最终结果"""
@@ -683,25 +773,26 @@ class QueryEngine:
         self.total_usage.cost_usd += cost_usd
     
     async def _stream_llm_call(self) -> AsyncGenerator[Dict[str, Any], None]:
-        """流式调用 LLM
-        
-        内部方法，处理 LLM 的流式响应。
-        
-        Yields:
-            Dict[str, Any]: 流式响应块
-        """
-        messages = self._prepare_messages_for_llm()
-        
+        messages = await self._prepare_messages_for_llm()
         async for chunk in self.llm_caller.stream_call(messages, use_tools=True):
             yield chunk
     
-    def _prepare_messages_for_llm(self) -> List[BaseMessage]:
-        """准备发送给 LLM 的消息列表
-        
-        Returns:
-            List[BaseMessage]: 准备好的消息列表
-        """
-        return list(self.mutable_messages)
+    async def _prepare_messages_for_llm(self) -> List[BaseMessage]:
+        if not self._compression_enabled or self._compressor is None:
+            return list(self.mutable_messages)
+
+        messages = self._compressor.get_messages_after_compact_boundary(self.mutable_messages)
+
+        messages, _ = self._compressor.apply_tool_result_budget(messages)
+
+        messages, snip_tokens_freed = self._compressor.snip_compact(messages)
+
+        original_len = len(self.mutable_messages)
+        messages = await self._compressor.auto_compact_if_needed(messages, snip_tokens_freed)
+        if len(messages) < original_len:
+            self._restore_post_compact_context()
+
+        return messages
     
     async def _execute_tool_safe(
         self,
@@ -772,3 +863,6 @@ class QueryEngine:
                 "total_tokens": total_tokens,
                 "cumulative_tokens": self.total_usage.total_tokens
             })
+        
+        if self._compressor is not None:
+            self._compressor.update_usage_from_response(response)

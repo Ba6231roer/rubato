@@ -342,8 +342,19 @@ class MessageCompressionConfig(BaseModel):
     keep_recent: int = 6
     summary_max_length: int = 300
     history_summary_count: int = 10
+    autocompact_buffer_tokens: int = 13000
+    manual_compact_buffer_tokens: int = 3000
+    warning_threshold_buffer_tokens: int = 20000
+    snip_keep_recent: int = 6
+    tool_result_persist_threshold: int = 50000
+    tool_result_budget_per_message: int = 200000
+    max_consecutive_failures: int = 3
 
-    @field_validator('max_tokens', 'keep_recent', 'summary_max_length', 'history_summary_count')
+    @field_validator('max_tokens', 'keep_recent', 'summary_max_length', 'history_summary_count',
+                     'autocompact_buffer_tokens', 'manual_compact_buffer_tokens',
+                     'warning_threshold_buffer_tokens', 'snip_keep_recent',
+                     'tool_result_persist_threshold', 'tool_result_budget_per_message',
+                     'max_consecutive_failures')
     @classmethod
     def validate_positive(cls, v):
         if v <= 0:

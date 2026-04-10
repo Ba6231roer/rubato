@@ -18,6 +18,8 @@ from .sub_agents import SubAgentManager, create_spawn_agent_tool
 from ..utils.logger import get_llm_logger
 from ..tools.docs import generate_tool_docs_for_prompt
 from .query_engine import QueryEngine, QueryEngineConfig, FileStateCache
+from ..context.compressor import ContextCompressor
+from ..context.tool_result_storage import ToolResultStorage, ContentReplacementState
 
 
 def _content_to_str(content) -> str:
@@ -42,80 +44,26 @@ def _content_to_str(content) -> str:
 
 
 def _estimate_tokens(messages: List) -> int:
-    """估算消息的token数量（粗略估计：1 token ≈ 4 字符）"""
-    total = 0
-    for msg in messages:
-        content_str = _content_to_str(msg.content)
-        total += len(content_str) // 4
-        if hasattr(msg, 'tool_calls') and msg.tool_calls:
-            for tc in msg.tool_calls:
-                total += len(str(tc.get('name', ''))) // 4
-                total += len(str(tc.get('args', {}))) // 4
-    return total
+    import warnings
+    warnings.warn("_estimate_tokens is deprecated, use ContextCompressor.estimate_tokens() instead", DeprecationWarning, stacklevel=2)
+    compressor = ContextCompressor()
+    return compressor.estimate_tokens(messages)
 
 
 def _compress_messages(messages: List, max_tokens: int = 50000, keep_recent: int = 6, 
                        summary_max_length: int = 300, history_summary_count: int = 10) -> List:
-    """压缩消息列表，保持在token限制内，确保消息链完整性"""
-    current_tokens = _estimate_tokens(messages)
-    
-    if current_tokens <= max_tokens:
-        return messages
-    
-    system_messages = [m for m in messages if isinstance(m, SystemMessage)]
-    other_messages = [m for m in messages if not isinstance(m, SystemMessage)]
-    
-    if len(other_messages) <= 4:
-        return messages
-    
-    recent_messages = other_messages[-keep_recent:]
-    old_messages = other_messages[:-keep_recent]
-    
-    summary_parts = []
-    for i, msg in enumerate(old_messages):
-        role = "用户" if isinstance(msg, HumanMessage) else "AI" if isinstance(msg, AIMessage) else "工具"
-        content_str = _content_to_str(msg.content)
-        content = content_str[:summary_max_length] + "..." if len(content_str) > summary_max_length else content_str
-        
-        if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
-            tool_names = [tc.get('name', 'unknown') for tc in msg.tool_calls]
-            summary_parts.append(f"[{role}]: 调用工具: {', '.join(tool_names)}")
-        else:
-            summary_parts.append(f"[{role}]: {content}")
-    
-    summary = HumanMessage(content=f"[历史摘要]\n" + "\n".join(summary_parts[-history_summary_count:]))
-    
-    valid_recent = _ensure_message_chain_valid(recent_messages)
-    
-    return system_messages + [summary] + valid_recent
+    import warnings
+    warnings.warn("_compress_messages is deprecated, use ContextCompressor.compress() instead", DeprecationWarning, stacklevel=2)
+    compressor = ContextCompressor(max_context_tokens=max_tokens, keep_recent=keep_recent,
+                                    summary_max_length=summary_max_length, history_summary_count=history_summary_count)
+    return compressor.compress(messages)
 
 
 def _ensure_message_chain_valid(messages: List) -> List:
-    """确保消息链有效：ToolMessage必须紧跟在带tool_calls的AIMessage之后"""
-    if not messages:
-        return messages
-    
-    valid_messages = []
-    pending_tool_call_ids = set()
-    
-    for msg in messages:
-        if isinstance(msg, AIMessage):
-            valid_messages.append(msg)
-            if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                for tc in msg.tool_calls:
-                    pending_tool_call_ids.add(tc.get('id'))
-        elif isinstance(msg, ToolMessage):
-            if msg.tool_call_id in pending_tool_call_ids:
-                valid_messages.append(msg)
-                pending_tool_call_ids.discard(msg.tool_call_id)
-            else:
-                content_str = _content_to_str(msg.content)
-                content = content_str[:200] + "..." if len(content_str) > 200 else content_str
-                valid_messages.append(HumanMessage(content=f"[工具结果摘要]: {content}"))
-        else:
-            valid_messages.append(msg)
-    
-    return valid_messages
+    import warnings
+    warnings.warn("_ensure_message_chain_valid is deprecated, use ContextCompressor._ensure_message_chain_valid() instead", DeprecationWarning, stacklevel=2)
+    compressor = ContextCompressor()
+    return compressor._ensure_message_chain_valid(messages)
 
 
 def _convert_messages_for_api(messages: List) -> List:
@@ -242,20 +190,20 @@ class RubatoAgent:
             messages = state.get("messages", [])
             
             if self.compression_config.enabled:
-                compressed = _compress_messages(
-                    messages, 
-                    max_tokens=self.compression_config.max_tokens,
+                compressor = ContextCompressor(
+                    max_context_tokens=self.compression_config.max_tokens,
                     keep_recent=self.compression_config.keep_recent,
                     summary_max_length=self.compression_config.summary_max_length,
-                    history_summary_count=self.compression_config.history_summary_count
+                    history_summary_count=self.compression_config.history_summary_count,
                 )
+                compressed = compressor.compress(messages)
             else:
                 compressed = messages
             
             converted = _convert_messages_for_api(compressed)
             
             if self.logging_config.log_token_estimation:
-                token_estimate = _estimate_tokens(compressed)
+                token_estimate = sum(len(str(m.content)) // 4 for m in compressed)
                 self.logger.log_agent_action("pre_model_hook", {
                     "original_messages": len(messages),
                     "compressed_messages": len(compressed),
@@ -307,7 +255,15 @@ class RubatoAgent:
             max_turns=self.recursion_limit,
             model_name=self.config.model.model.name,
             temperature=self.config.model.model.temperature,
-            max_tokens=self.config.model.model.max_tokens
+            max_tokens=self.config.model.model.max_tokens,
+            compression_enabled=self.compression_config.enabled,
+            max_context_tokens=self.max_context_tokens,
+            autocompact_buffer_tokens=getattr(self.compression_config, 'autocompact_buffer_tokens', 13000),
+            keep_recent=self.compression_config.keep_recent,
+            snip_keep_recent=getattr(self.compression_config, 'snip_keep_recent', 6),
+            tool_result_persist_threshold=getattr(self.compression_config, 'tool_result_persist_threshold', 50000),
+            tool_result_budget_per_message=getattr(self.compression_config, 'tool_result_budget_per_message', 200000),
+            max_consecutive_failures=getattr(self.compression_config, 'max_consecutive_failures', 3),
         )
         
         return QueryEngine(query_config)

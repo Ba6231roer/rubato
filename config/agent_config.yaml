@@ -7,6 +7,13 @@ agent:
     keep_recent: 6
     summary_max_length: 300
     history_summary_count: 10
+    autocompact_buffer_tokens: 13000
+    manual_compact_buffer_tokens: 3000
+    warning_threshold_buffer_tokens: 20000
+    snip_keep_recent: 6
+    tool_result_persist_threshold: 50000
+    tool_result_budget_per_message: 200000
+    max_consecutive_failures: 3
   
   execution:
     recursion_limit: 100
@@ -17,7 +24,7 @@ agent:
     log_token_estimation: true
     log_compression_stats: true
     log_step_details: true
-    log_format: compact
-    tool_log_mode: summary
+    log_format: detailed
+    tool_log_mode: detailed
 
 

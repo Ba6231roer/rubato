@@ -201,7 +201,8 @@ class LLMCaller:
         tools: Optional[List[BaseTool]] = None,
         system_prompt: Optional[str] = None,
         logger: Optional[Any] = None,
-        timeout: float = 300.0
+        timeout: float = 300.0,
+        max_context_tokens: Optional[int] = None
     ):
         self.llm = llm
         self.tools = tools or []
@@ -210,6 +211,7 @@ class LLMCaller:
         self._bound_llm = None
         self.logger = logger
         self.timeout = timeout
+        self.max_context_tokens = max_context_tokens
     
     def bind_tools(self, tools: Optional[List[BaseTool]] = None) -> 'LLMCaller':
         """绑定工具到 LLM
@@ -420,9 +422,18 @@ class LLMCaller:
             if self.logger:
                 self.logger.log_response(final_message, self.llm.model_name if hasattr(self.llm, 'model_name') else 'unknown')
             
+            usage_data = {}
+            if hasattr(final_message, 'usage_metadata') and final_message.usage_metadata:
+                usage_data = {
+                    "input_tokens": final_message.usage_metadata.get("input_tokens", 0),
+                    "output_tokens": final_message.usage_metadata.get("output_tokens", 0),
+                    "total_tokens": final_message.usage_metadata.get("total_tokens", 0),
+                }
+            
             yield {
                 "type": "complete",
-                "response": final_message
+                "response": final_message,
+                "usage": usage_data,
             }
             
         except asyncio.TimeoutError:
@@ -471,6 +482,19 @@ class LLMCaller:
             full_messages.append(SystemMessage(content=self.system_prompt))
         
         full_messages.extend(messages)
+
+        total_chars = sum(len(str(m.content)) for m in full_messages)
+        estimated_tokens = total_chars // 4
+
+        if self.logger:
+            self.logger.log_agent_action("token_estimation", {
+                "message_count": len(full_messages),
+                "estimated_tokens": estimated_tokens,
+                "total_chars": total_chars,
+            })
+        
+        if self.max_context_tokens and estimated_tokens >= self.max_context_tokens - 3000:
+            raise ValueError(f"消息 token 数 ({estimated_tokens}) 超过阻塞限制 ({self.max_context_tokens - 3000})，请压缩上下文或开始新对话")
         
         return full_messages
     
