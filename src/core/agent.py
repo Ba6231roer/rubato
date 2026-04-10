@@ -1,4 +1,5 @@
 import re
+import json
 from langgraph.prebuilt import create_react_agent
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
@@ -829,7 +830,10 @@ class RubatoAgent:
                         tool_info.get("name", "unknown"),
                         tool_info.get("args", {})
                     )
-                    yield f"\n[调用工具: {tool_info.get('name', 'unknown')}]\n"
+                    tool_name = tool_info.get('name', 'unknown')
+                    tool_args = tool_info.get('args', {})
+                    args_str = json.dumps(tool_args, ensure_ascii=False) if tool_args else ""
+                    yield f"\n[调用工具: {tool_name}, 参数: {args_str}]\n"
                     
                 elif message.type == "tool_result":
                     tool_info = message.content
