@@ -49,12 +49,12 @@ BUILTIN_TOOLS_DOCS: Dict[str, ToolDoc] = {
         name="shell_tool",
         description="执行Shell命令。",
         parameters=[
-            ToolParameter("command", "str", "要执行的命令", required=True),
+            ToolParameter("commands", "str", "要执行的shell命令字符串，例如 'git status' 或 'dir'", required=True),
         ],
         examples=[
             ToolExample(
                 description="查看git状态",
-                code='shell_tool(command="git status")'
+                code='shell_tool(commands="git status")'
             )
         ],
         category="builtin"

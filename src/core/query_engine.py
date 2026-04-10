@@ -5,6 +5,7 @@ QueryEngine 核心类实现
 """
 
 import asyncio
+import json
 import os
 import uuid
 from dataclasses import dataclass, field
@@ -539,9 +540,11 @@ class QueryEngine:
                         }
                     )
                     
+                    preprocessed_args = self._preprocess_tool_args(tool_name, tool_args)
+                    
                     result = await self._execute_tool_safe(
                         tool_instance,
-                        tool_args,
+                        preprocessed_args,
                         tool_call_id
                     )
                     
@@ -559,7 +562,9 @@ class QueryEngine:
                     )
                     
                 except Exception as e:
-                    error_msg = f"工具执行错误: {str(e)}"
+                    error_msg = self._build_format_hint(
+                        tool_name, tool_args, f"工具执行错误: {str(e)}"
+                    )
                     tool_result_msg = ToolMessage(
                         content=error_msg,
                         tool_call_id=tool_call_id
@@ -794,6 +799,81 @@ class QueryEngine:
 
         return messages
     
+    def _preprocess_tool_args(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        """预处理工具参数，检测并修复 JSON 编码的字符串参数
+
+        对于拥有自定义 model_validator 的工具（如 terminal 的 RubatoShellInput），
+        跳过预处理，让工具自身的 validator 处理 JSON 解包。
+
+        Args:
+            tool_name: 工具名称
+            args: 工具参数字典
+
+        Returns:
+            Dict[str, Any]: 预处理后的参数字典
+        """
+        if not isinstance(args, dict):
+            return args
+
+        skip_keys = set()
+        if tool_name == "terminal":
+            skip_keys.add("commands")
+
+        preprocessed = {}
+        for key, value in args.items():
+            if key in skip_keys:
+                preprocessed[key] = value
+                continue
+
+            if isinstance(value, str) and len(value) > 1:
+                stripped = value.strip()
+                if (stripped.startswith('[') and stripped.endswith(']')) or \
+                   (stripped.startswith('{') and stripped.endswith('}')):
+                    try:
+                        parsed = json.loads(stripped)
+                        self.logger.log_agent_action("tool_args_preprocessed", {
+                            "session_id": self._session_id,
+                            "tool_name": tool_name,
+                            "param_name": key,
+                            "original_type": "str",
+                            "original_value_preview": stripped[:100],
+                            "parsed_type": type(parsed).__name__,
+                        })
+                        preprocessed[key] = parsed
+                        continue
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+            preprocessed[key] = value
+
+        return preprocessed
+
+    def _build_format_hint(self, tool_name: str, args: Dict[str, Any], original_error: str) -> str:
+        """构建参数格式修正提示
+
+        Args:
+            tool_name: 工具名称
+            args: 原始工具参数
+            original_error: 原始错误信息
+
+        Returns:
+            str: 包含格式修正提示的错误消息
+        """
+        hint = original_error
+
+        if tool_name == "terminal" and "commands" in args:
+            commands_value = args["commands"]
+            if isinstance(commands_value, str):
+                stripped = commands_value.strip()
+                if stripped.startswith('[') or stripped.startswith('{'):
+                    hint += (
+                        "\n\n[参数格式提示] commands 参数应为纯命令字符串，"
+                        "不要使用 JSON 数组格式。"
+                        f"正确示例: commands='git status'，"
+                        f"错误示例: commands='{stripped[:50]}'"
+                    )
+
+        return hint
+
     async def _execute_tool_safe(
         self,
         tool: BaseTool,

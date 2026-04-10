@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Callable, Any
 from langchain_core.tools import BaseTool
-from langchain_community.tools import ShellTool
+from .shell import RubatoShellTool
 
 
 class ToolProvider(ABC):
@@ -102,7 +102,7 @@ class ShellToolProvider(ToolProvider):
     
     def __init__(self):
         """初始化 Shell 工具提供者"""
-        self._tool: BaseTool = ShellTool()
+        self._tool: BaseTool = RubatoShellTool()
     
     def get_tools(self) -> List[BaseTool]:
         """获取工具列表
