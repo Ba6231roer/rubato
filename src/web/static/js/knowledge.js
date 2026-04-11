@@ -135,6 +135,13 @@ class KnowledgeManager {
     
     handleWSMessage(data) {
         switch (data.type) {
+            case 'command_result':
+                if (this.chatPanel.isCommandMode) {
+                    const result = data.content;
+                    const message = result.message || '';
+                    this.chatPanel.addCommandResult(message, false);
+                }
+                break;
             case 'chunk':
                 this.chatPanel.appendAIMessage(data.content);
                 break;

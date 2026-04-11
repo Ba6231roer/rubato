@@ -4,6 +4,7 @@ class App {
         this.wsClient = null;
         this.currentView = 'chat';
         this.isStreaming = false;
+        this.isCommandMode = false;
         this.knowledgeManager = null;
         this.testcaseManager = null;
         this.commands = [];
@@ -205,11 +206,17 @@ class App {
         
         this.addUserMessage(content);
         this.elements.chatInput.value = '';
-        this.isStreaming = true;
-        this.elements.sendBtn.disabled = true;
         
-        this.createAIMessage();
-        this.wsClient.send('task', content);
+        if (content.startsWith('/')) {
+            this.isCommandMode = true;
+            this.elements.sendBtn.disabled = true;
+            this.wsClient.send('task', content);
+        } else {
+            this.isStreaming = true;
+            this.elements.sendBtn.disabled = true;
+            this.createAIMessage();
+            this.wsClient.send('task', content);
+        }
     }
     
     stopTask() {
@@ -402,20 +409,42 @@ class App {
     }
     
     handleCommandResult(result) {
-        const msgEl = document.getElementById('current-ai-message');
-        if (msgEl) {
-            const contentEl = msgEl.querySelector('.message-content');
+        if (this.isCommandMode) {
+            const msgEl = document.createElement('div');
+            msgEl.className = 'message ai';
+            const contentEl = document.createElement('div');
+            contentEl.className = 'message-content';
             if (result.data) {
                 this.renderStructuredResult(contentEl, result);
             } else {
                 contentEl.textContent = result.message;
             }
-            contentEl.classList.remove('streaming');
-            msgEl.removeAttribute('id');
+            msgEl.innerHTML = `<div class="message-header">系统</div>`;
+            msgEl.appendChild(contentEl);
+            this.elements.chatMessages.appendChild(msgEl);
+            this.scrollToBottom();
+            
+            this.isCommandMode = false;
+            this.elements.sendBtn.disabled = false;
+        } else {
+            const msgEl = document.getElementById('current-ai-message');
+            if (msgEl) {
+                const contentEl = msgEl.querySelector('.message-content');
+                if (result.data) {
+                    this.renderStructuredResult(contentEl, result);
+                } else {
+                    contentEl.textContent = result.message;
+                }
+                contentEl.classList.remove('streaming');
+                msgEl.removeAttribute('id');
+            }
+            
+            this.isStreaming = false;
+            this.elements.sendBtn.disabled = false;
+            this.elements.sendBtn.textContent = '发送';
+            this.elements.sendBtn.classList.remove('btn-danger');
+            this.elements.sendBtn.classList.add('btn-primary');
         }
-        
-        this.isStreaming = false;
-        this.elements.sendBtn.disabled = false;
     }
     
     renderStructuredResult(container, result) {

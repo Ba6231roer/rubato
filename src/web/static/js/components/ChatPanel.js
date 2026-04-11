@@ -6,6 +6,7 @@ class ChatPanel {
         
         this.messages = [];
         this.isStreaming = false;
+        this.isCommandMode = false;
         this.currentAIMessage = null;
         
         this.messagesEl = null;
@@ -75,10 +76,16 @@ class ChatPanel {
         this.inputEl.value = '';
         
         if (this.onSend) {
-            this.isStreaming = true;
-            this.sendBtn.disabled = true;
-            this.createAIMessage();
-            this.onSend(content);
+            if (content.startsWith('/')) {
+                this.isCommandMode = true;
+                this.sendBtn.disabled = true;
+                this.onSend(content);
+            } else {
+                this.isStreaming = true;
+                this.sendBtn.disabled = true;
+                this.createAIMessage();
+                this.onSend(content);
+            }
         }
     }
     
@@ -144,6 +151,25 @@ class ChatPanel {
         this.sendBtn.classList.add('btn-primary');
     }
     
+    addCommandResult(content, isHtml) {
+        const msgEl = document.createElement('div');
+        msgEl.className = 'message ai';
+        const contentEl = document.createElement('div');
+        contentEl.className = 'message-content';
+        if (isHtml) {
+            contentEl.innerHTML = content;
+        } else {
+            contentEl.textContent = content;
+        }
+        msgEl.innerHTML = `<div class="message-header">系统</div>`;
+        msgEl.appendChild(contentEl);
+        this.messagesEl.appendChild(msgEl);
+        this.messages.push({ type: 'ai', content });
+        this.scrollToBottom();
+        this.isCommandMode = false;
+        this.sendBtn.disabled = false;
+    }
+
     showErrorMessage(content) {
         if (this.currentAIMessage) {
             const contentEl = this.currentAIMessage.querySelector('.message-content');
