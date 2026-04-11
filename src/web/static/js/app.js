@@ -245,6 +245,7 @@ class App {
         this.elements.chatMessages.appendChild(msgEl);
         this.scrollToBottom();
         this.elements.sendBtn.textContent = '停止';
+        this.elements.sendBtn.disabled = false;
         this.elements.sendBtn.classList.remove('btn-primary');
         this.elements.sendBtn.classList.add('btn-danger');
     }

@@ -119,6 +119,7 @@ class ChatPanel {
         this.currentAIMessage = msgEl;
         this.scrollToBottom();
         this.sendBtn.textContent = '停止';
+        this.sendBtn.disabled = false;
         this.sendBtn.classList.remove('btn-primary');
         this.sendBtn.classList.add('btn-danger');
     }
