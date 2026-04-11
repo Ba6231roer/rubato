@@ -214,6 +214,7 @@ class QueryEngine:
         self._session_id: str = str(uuid.uuid4())
         self._current_turn: int = 0
         self._is_running: bool = False
+        self._reactive_compact_attempted: bool = False
         self.logger = get_llm_logger()
         
         # 创建 LLMCaller，传递 logger 和 timeout
@@ -365,6 +366,7 @@ class QueryEngine:
         
         while self._current_turn < (self.config.max_turns or 100):
             self._current_turn += 1
+            self._reactive_compact_attempted = False
             
             self.logger.log_agent_action("react_loop_start", {
                 "session_id": self._session_id,
@@ -372,6 +374,8 @@ class QueryEngine:
                 "max_turns": self.config.max_turns,
                 "message_count": len(self.mutable_messages)
             })
+
+            await self._run_compression_pipeline()
 
             if self._compressor is not None:
                 estimated_tokens = self._compressor.estimate_tokens(self.mutable_messages)
@@ -384,11 +388,18 @@ class QueryEngine:
                 })
 
             if self._check_blocking_limit():
-                yield SDKMessage.error(
-                    message="上下文已达到阻塞限制，请开始新对话或清理上下文",
-                    error_type="blocking_limit_reached"
-                )
-                break
+                force_success = await self._force_compact()
+                if force_success:
+                    self.logger.log_agent_action("blocking_limit_recovered", {
+                        "session_id": self._session_id,
+                        "turn": self._current_turn,
+                    })
+                else:
+                    yield SDKMessage.error(
+                        message="上下文已达到阻塞限制，请开始新对话或清理上下文",
+                        error_type="blocking_limit_reached"
+                    )
+                    break
             
             yield SDKMessage.assistant(
                 content="",
@@ -399,6 +410,7 @@ class QueryEngine:
             )
             
             llm_response = None
+            prompt_too_long_detected = False
             async for chunk in self._stream_llm_call():
                 if chunk.get("type") == "text_delta":
                     yield SDKMessage.assistant(
@@ -415,7 +427,31 @@ class QueryEngine:
                     )
                 elif chunk.get("type") == "complete":
                     llm_response = chunk.get("response")
+                elif chunk.get("type") == "error":
+                    error_msg = chunk.get("message", "")
+                    error_lower = error_msg.lower()
+                    if any(kw in error_lower for kw in ["prompt too long", "context_length_exceeded", "context length", "max_tokens", "token limit"]):
+                        prompt_too_long_detected = True
+                    else:
+                        yield SDKMessage.error(
+                            message=error_msg,
+                            error_type="llm_error"
+                        )
             
+            if prompt_too_long_detected:
+                recovered = await self._handle_prompt_too_long()
+                if recovered:
+                    self.logger.log_agent_action("prompt_too_long_recovered", {
+                        "session_id": self._session_id,
+                        "turn": self._current_turn,
+                    })
+                    continue
+                yield SDKMessage.error(
+                    message="上下文过长导致API请求失败，压缩后仍无法恢复",
+                    error_type="prompt_too_long"
+                )
+                break
+
             if llm_response is None:
                 yield SDKMessage.error(
                     message="LLM 响应为空",
@@ -621,6 +657,28 @@ class QueryEngine:
         warning_state = self._compressor.calculate_token_warning_state(estimated_tokens)
         return warning_state.get("is_at_blocking_limit", False)
 
+    async def _run_compression_pipeline(self) -> None:
+        if not self._compression_enabled or self._compressor is None:
+            return
+
+        messages = self._compressor.get_messages_after_compact_boundary(self.mutable_messages)
+        messages, _ = self._compressor.apply_tool_result_budget(messages)
+        messages, snip_tokens_freed = self._compressor.snip_compact(messages)
+
+        original_len = len(self.mutable_messages)
+        messages = await self._compressor.auto_compact_if_needed(messages, snip_tokens_freed)
+
+        if len(messages) < original_len:
+            self.mutable_messages = messages
+            self._restore_post_compact_context()
+            self.logger.log_agent_action("compression_pipeline_completed", {
+                "session_id": self._session_id,
+                "original_message_count": original_len,
+                "compressed_message_count": len(self.mutable_messages),
+            })
+        elif messages is not self.mutable_messages:
+            self.mutable_messages = messages
+
     def _handle_compact_boundary(self) -> None:
         if self._compressor is None:
             return
@@ -639,16 +697,67 @@ class QueryEngine:
             for file_path, state in list(self.read_file_state.cache.items())[-5:]:
                 content = state.get("content", "")
                 if content:
-                    estimated_tokens = len(content) // 4
+                    estimated_tokens = self._compressor.count_text_tokens(content) if self._compressor else len(content) // 4
                     if estimated_tokens <= 5000:
                         attachment_parts.append(f"File: {file_path}\n{content[:20000]}")
             if attachment_parts:
-                total_tokens = sum(len(p) // 4 for p in attachment_parts)
+                total_tokens = sum(self._compressor.count_text_tokens(p) if self._compressor else len(p) // 4 for p in attachment_parts)
                 if total_tokens <= 50000:
                     attachment_msg = HumanMessage(
                         content="[Post-compact file context]\n" + "\n---\n".join(attachment_parts)
                     )
                     self.mutable_messages.append(attachment_msg)
+
+    async def _force_compact(self) -> bool:
+        if self._compressor is None:
+            return False
+        if self._compressor._consecutive_failures >= self._compressor.max_consecutive_failures:
+            self.logger.log_agent_action("force_compact_skipped", {
+                "session_id": self._session_id,
+                "reason": "circuit_breaker_active",
+                "consecutive_failures": self._compressor._consecutive_failures,
+            })
+            return False
+        try:
+            messages = self._compressor.get_messages_after_compact_boundary(self.mutable_messages)
+            messages = self._compressor._strip_images_from_messages(messages)
+            compressed = await self._compressor.auto_compact(messages)
+            self.mutable_messages = compressed
+            self._restore_post_compact_context()
+            self._compressor._consecutive_failures = 0
+            self.logger.log_agent_action("force_compact_success", {
+                "session_id": self._session_id,
+                "compressed_message_count": len(self.mutable_messages),
+            })
+            return True
+        except Exception as e:
+            self._compressor._consecutive_failures += 1
+            self.logger.log_error("force_compact", e)
+            return False
+    
+    async def _handle_prompt_too_long(self) -> bool:
+        if self._reactive_compact_attempted:
+            self.logger.log_agent_action("reactive_compact_skipped", {
+                "session_id": self._session_id,
+                "reason": "already_attempted",
+            })
+            return False
+        self._reactive_compact_attempted = True
+        if self._compressor is None:
+            return False
+        try:
+            messages = self._compressor.get_messages_after_compact_boundary(self.mutable_messages)
+            compressed = await self._compressor.auto_compact(messages)
+            self.mutable_messages = compressed
+            self._restore_post_compact_context()
+            self.logger.log_agent_action("reactive_compact_success", {
+                "session_id": self._session_id,
+                "compressed_message_count": len(self.mutable_messages),
+            })
+            return True
+        except Exception as e:
+            self.logger.log_error("reactive_compact", e)
+            return False
     
     def _get_final_result(self) -> str:
         """获取最终结果"""
@@ -783,21 +892,7 @@ class QueryEngine:
             yield chunk
     
     async def _prepare_messages_for_llm(self) -> List[BaseMessage]:
-        if not self._compression_enabled or self._compressor is None:
-            return list(self.mutable_messages)
-
-        messages = self._compressor.get_messages_after_compact_boundary(self.mutable_messages)
-
-        messages, _ = self._compressor.apply_tool_result_budget(messages)
-
-        messages, snip_tokens_freed = self._compressor.snip_compact(messages)
-
-        original_len = len(self.mutable_messages)
-        messages = await self._compressor.auto_compact_if_needed(messages, snip_tokens_freed)
-        if len(messages) < original_len:
-            self._restore_post_compact_context()
-
-        return messages
+        return list(self.mutable_messages)
     
     def _preprocess_tool_args(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """预处理工具参数，检测并修复 JSON 编码的字符串参数

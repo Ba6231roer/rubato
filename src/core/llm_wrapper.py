@@ -6,6 +6,7 @@ from typing import List, Optional, Any, Dict, AsyncGenerator
 from dataclasses import dataclass, field
 import time
 import asyncio
+import tiktoken
 
 
 @dataclass
@@ -484,7 +485,11 @@ class LLMCaller:
         full_messages.extend(messages)
 
         total_chars = sum(len(str(m.content)) for m in full_messages)
-        estimated_tokens = total_chars // 4
+        try:
+            encoding = tiktoken.get_encoding("cl100k_base")
+            estimated_tokens = sum(len(encoding.encode(str(m.content))) for m in full_messages)
+        except Exception:
+            estimated_tokens = total_chars // 4
 
         if self.logger:
             self.logger.log_agent_action("token_estimation", {
@@ -494,7 +499,12 @@ class LLMCaller:
             })
         
         if self.max_context_tokens and estimated_tokens >= self.max_context_tokens - 3000:
-            raise ValueError(f"消息 token 数 ({estimated_tokens}) 超过阻塞限制 ({self.max_context_tokens - 3000})，请压缩上下文或开始新对话")
+            if self.logger:
+                self.logger.log_agent_action("blocking_limit_warning", {
+                    "estimated_tokens": estimated_tokens,
+                    "blocking_limit": self.max_context_tokens - 3000,
+                    "message": "Token count exceeds blocking limit, but proceeding - QueryEngine handles this",
+                })
         
         return full_messages
     

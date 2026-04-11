@@ -74,11 +74,8 @@ class ContextCompressor:
 
     def estimate_tokens(self, messages: List[BaseMessage]) -> int:
         if self._last_api_usage_tokens > 0:
-            return self._last_api_usage_tokens + sum(
-                len(self._get_content_str(m.content)) // 4
-                for m in messages
-            )
-        return sum(len(self._get_content_str(m.content)) // 4 for m in messages)
+            return self._last_api_usage_tokens
+        return self.count_tokens(messages)
 
     def update_usage_from_response(self, response: AIMessage) -> None:
         usage_metadata = getattr(response, 'usage_metadata', None)
@@ -131,14 +128,14 @@ class ContextCompressor:
         for idx, msg in tool_messages:
             if msg.tool_call_id not in recent_tool_ids:
                 old_content = self._get_content_str(msg.content)
-                old_tokens = len(old_content) // 4
+                old_tokens = self.count_text_tokens(old_content)
                 new_msg = ToolMessage(
                     content=TOOL_RESULT_CLEARED_MESSAGE,
                     tool_call_id=msg.tool_call_id,
                     name=getattr(msg, 'name', None),
                 )
                 modified_messages[idx] = new_msg
-                new_tokens = len(TOOL_RESULT_CLEARED_MESSAGE) // 4
+                new_tokens = self.count_text_tokens(TOOL_RESULT_CLEARED_MESSAGE)
                 tokens_freed += max(0, old_tokens - new_tokens)
 
         return modified_messages, tokens_freed
