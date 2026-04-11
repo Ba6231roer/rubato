@@ -64,8 +64,12 @@ class ChatPanel {
     }
     
     send() {
+        if (this.isStreaming) {
+            this.stopTask();
+            return;
+        }
         const content = this.inputEl.value.trim();
-        if (!content || this.isStreaming) return;
+        if (!content) return;
         
         this.addUserMessage(content);
         this.inputEl.value = '';
@@ -75,6 +79,12 @@ class ChatPanel {
             this.sendBtn.disabled = true;
             this.createAIMessage();
             this.onSend(content);
+        }
+    }
+    
+    stopTask() {
+        if (window.app && window.app.wsClient) {
+            window.app.wsClient.send('stop', '');
         }
     }
     
@@ -101,6 +111,9 @@ class ChatPanel {
         this.messagesEl.appendChild(msgEl);
         this.currentAIMessage = msgEl;
         this.scrollToBottom();
+        this.sendBtn.textContent = '停止';
+        this.sendBtn.classList.remove('btn-primary');
+        this.sendBtn.classList.add('btn-danger');
     }
     
     appendAIMessage(content) {
@@ -126,6 +139,9 @@ class ChatPanel {
         
         this.isStreaming = false;
         this.sendBtn.disabled = false;
+        this.sendBtn.textContent = '发送';
+        this.sendBtn.classList.remove('btn-danger');
+        this.sendBtn.classList.add('btn-primary');
     }
     
     showErrorMessage(content) {

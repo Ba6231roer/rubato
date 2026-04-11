@@ -356,6 +356,11 @@ Skill管理：
             role = self.role_manager.switch_role(name)
             
             self.agent.context_manager.clear()
+            self.agent.reset_query_engine()
+            
+            role_skills = None
+            if role.tools and role.tools.skills:
+                role_skills = role.tools.skills
             
             if self.agent_pool:
                 new_tool_registry = self.agent_pool._create_tool_registry(
@@ -364,6 +369,8 @@ Skill管理：
                 )
                 self.agent.role_config = role
                 self.agent.reload_tools(new_tool_registry)
+            
+            await self.agent.load_role_skills(role_skills)
             
             self.agent.reload_system_prompt(role)
             
@@ -378,17 +385,63 @@ Skill管理：
                     "max_tokens": merged_model.max_tokens
                 })
             
-            return f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。"
+            tools_info = self._get_tools_summary(new_tool_registry) if self.agent_pool else ""
+            
+            skills_info = ""
+            if role_skills:
+                skill_details = []
+                for skill_name in role_skills:
+                    metadata = self.skill_loader.registry.get_skill(skill_name)
+                    if metadata:
+                        skill_details.append(f"{metadata.name}: {metadata.description}")
+                    else:
+                        skill_details.append(f"{skill_name}: Skill元数据未找到")
+                skills_info = f"\nSkills: {', '.join(skill_details)}"
+            
+            return f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。\n{tools_info}{skills_info}"
             
         except ConfigValidationError as e:
             return f"切换角色失败：{str(e)}"
         except Exception as e:
             return f"切换角色时发生错误：{str(e)}"
     
+    def _get_tools_summary(self, tool_registry) -> str:
+        tools = tool_registry.get_all_tools()
+        if not tools:
+            return "工具: 无"
+        
+        builtin_tools = []
+        mcp_tools = []
+        other_tools = []
+        
+        builtin_names = {'spawn_agent', 'shell_tool', 'file_read', 'file_write', 
+                        'file_list', 'file_search', 'file_exists', 'file_mkdir', 
+                        'file_replace', 'file_delete'}
+        
+        for tool in tools:
+            tool_name = tool.name if hasattr(tool, 'name') else str(tool)
+            if tool_name in builtin_names:
+                builtin_tools.append(tool_name)
+            elif tool_name.startswith('browser_') or tool_name.startswith('mcp_'):
+                mcp_tools.append(tool_name)
+            else:
+                other_tools.append(tool_name)
+        
+        lines = [f"工具加载完成: {len(tools)}个工具"]
+        if builtin_tools:
+            lines.append(f"  - 内置工具: {', '.join(builtin_tools)}")
+        if mcp_tools:
+            lines.append(f"  - MCP工具: {', '.join(mcp_tools)}")
+        if other_tools:
+            lines.append(f"  - 其他工具: {', '.join(other_tools)}")
+        
+        return "\n".join(lines)
+    
     async def _cmd_new(self, args: str) -> str:
         """清空当前对话历史，开始新对话"""
         try:
             self.agent.context_manager.clear()
+            self.agent.reset_query_engine()
             
             current_role = self.role_manager.get_current_role() if self.role_manager else None
             if current_role:
@@ -418,6 +471,8 @@ Skill管理：
             
             if not results:
                 return "没有可重新加载的配置"
+            
+            self.agent.reset_query_engine()
             
             return "配置重新加载完成：\n" + "\n".join(results)
             

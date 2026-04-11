@@ -62,9 +62,11 @@ class ContextManager:
         self.messages = self.compressor.compress(self.messages)
     
     def clear(self) -> None:
-        """清空消息"""
         self.messages = []
         self._loaded_skills = []
+
+    def set_messages(self, messages: List[BaseMessage]) -> None:
+        self.messages = list(messages)
     
     def get_history(self, limit: Optional[int] = None) -> List[BaseMessage]:
         """获取历史消息"""

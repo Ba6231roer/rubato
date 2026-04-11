@@ -617,14 +617,7 @@ class RubatoAgent:
                 elif message.type == "result":
                     final_content = message.content if isinstance(message.content, str) else final_content
                     
-            for msg in self._query_engine.get_messages():
-                if isinstance(msg, AIMessage):
-                    self.context_manager.add_ai_message_full(msg)
-                elif isinstance(msg, ToolMessage):
-                    self.context_manager.add_tool_message(
-                        _content_to_str(msg.content),
-                        msg.tool_call_id
-                    )
+            self.sync_query_engine_messages()
             
             elapsed = time.time() - start_time
             usage = self._query_engine.get_usage()
@@ -1042,9 +1035,22 @@ class RubatoAgent:
         })
     
     def clear_context(self) -> None:
-        """清空上下文"""
         self.context_manager.clear()
+        if self._query_engine is not None:
+            self._query_engine.clear_messages()
     
+    def sync_query_engine_messages(self) -> None:
+        if self._query_engine is not None:
+            messages = self._query_engine.get_messages()
+            self.context_manager.set_messages(messages)
+
+    def reset_query_engine(self) -> None:
+        self._query_engine = None
+
+    def interrupt(self, reason: str = "用户中断") -> None:
+        if self._query_engine is not None and self._query_engine.is_running():
+            self._query_engine.interrupt(reason)
+
     def activate_skills_for_paths(self, file_paths: List[str]) -> List[str]:
         """激活匹配文件路径的条件 Skills
         

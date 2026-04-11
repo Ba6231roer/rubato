@@ -145,6 +145,9 @@ class TestCaseManager {
                 this.chatPanel.showErrorMessage(data.content);
                 this.chatPanel.finishAIMessage();
                 break;
+            case 'interrupted':
+                this.chatPanel.finishAIMessage();
+                break;
         }
     }
     

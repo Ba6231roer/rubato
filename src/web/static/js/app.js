@@ -181,12 +181,27 @@ class App {
                 this.showErrorMessage(data.content);
                 this.finishAIMessage();
                 break;
+            case 'interrupted':
+                this.finishAIMessage();
+                const interruptMsg = document.createElement('div');
+                interruptMsg.className = 'message ai';
+                interruptMsg.innerHTML = `
+                    <div class="message-header">系统</div>
+                    <div class="message-content" style="color: var(--error-color);">任务已中断</div>
+                `;
+                this.elements.chatMessages.appendChild(interruptMsg);
+                this.scrollToBottom();
+                break;
         }
     }
     
     sendMessage() {
+        if (this.isStreaming) {
+            this.stopTask();
+            return;
+        }
         const content = this.elements.chatInput.value.trim();
-        if (!content || this.isStreaming) return;
+        if (!content) return;
         
         this.addUserMessage(content);
         this.elements.chatInput.value = '';
@@ -195,6 +210,10 @@ class App {
         
         this.createAIMessage();
         this.wsClient.send('task', content);
+    }
+    
+    stopTask() {
+        this.wsClient.send('stop', '');
     }
     
     addUserMessage(content) {
@@ -218,6 +237,9 @@ class App {
         `;
         this.elements.chatMessages.appendChild(msgEl);
         this.scrollToBottom();
+        this.elements.sendBtn.textContent = '停止';
+        this.elements.sendBtn.classList.remove('btn-primary');
+        this.elements.sendBtn.classList.add('btn-danger');
     }
     
     appendAIMessage(content) {
@@ -238,6 +260,9 @@ class App {
         }
         this.isStreaming = false;
         this.elements.sendBtn.disabled = false;
+        this.elements.sendBtn.textContent = '发送';
+        this.elements.sendBtn.classList.remove('btn-danger');
+        this.elements.sendBtn.classList.add('btn-primary');
     }
     
     showErrorMessage(content) {
@@ -396,75 +421,85 @@ class App {
     renderStructuredResult(container, result) {
         if (result.data.roles) {
             container.innerHTML = this.renderRoleList(result.data.roles);
+        } else if (result.data.role && result.data.skills) {
+            container.innerHTML = this.renderRoleSwitch(result);
+        } else if (result.data.role_info) {
+            container.innerHTML = this.renderRoleInfo(result.data.role_info);
         } else if (result.data.skills) {
             container.innerHTML = this.renderSkillList(result.data.skills);
         } else if (result.data.tools) {
             container.innerHTML = this.renderToolList(result.data.tools);
         } else if (result.data.history) {
             container.innerHTML = this.renderHistoryList(result.data.history);
+        } else if (result.data.prompt !== undefined) {
+            container.innerHTML = this.renderPrompt(result.data.prompt, result.data.truncated);
+        } else if (result.data.model) {
+            container.innerHTML = this.renderConfig(result.data);
         } else {
-            container.innerHTML = `<pre>${this.escapeHtml(result.message)}</pre>`;
+            container.innerHTML = `<div class="result-list"><pre>${this.escapeHtml(result.message)}</pre></div>`;
         }
     }
     
     renderRoleList(roles) {
-        return `
-            <div class="result-list">
-                <h4>可用角色</h4>
-                <ul>
-                    ${roles.map(r => `
-                        <li class="${r.is_current ? 'current' : ''}">
-                            <strong>${r.name}</strong>${r.is_current ? ' (当前)' : ''}: ${r.description}
-                        </li>
-                    `).join('')}
-                </ul>
-            </div>
-        `;
+        const items = roles.map(r =>
+            `<li class="${r.is_current ? 'current' : ''}"><strong>${r.name}</strong>${r.is_current ? ' (当前)' : ''}: ${r.description}</li>`
+        ).join('');
+        return `<div class="result-list"><h4>可用角色</h4><ul>${items}</ul></div>`;
     }
     
     renderSkillList(skills) {
-        return `
-            <div class="result-list">
-                <h4>可用Skills</h4>
-                <ul>
-                    ${skills.map(s => `
-                        <li>
-                            <strong>${s.name}</strong>: ${s.description}
-                            ${s.triggers && s.triggers.length ? `<br><small>触发词: ${s.triggers.join(', ')}</small>` : ''}
-                        </li>
-                    `).join('')}
-                </ul>
-            </div>
-        `;
+        const items = skills.map(s => {
+            const name = s.name || s;
+            const desc = s.description || '';
+            const triggers = s.triggers && s.triggers.length ? `<br><small>触发词: ${s.triggers.join(', ')}</small>` : '';
+            return `<li><strong>${name}</strong>: ${desc}${triggers}</li>`;
+        }).join('');
+        return `<div class="result-list"><h4>可用Skills</h4><ul>${items}</ul></div>`;
     }
     
     renderToolList(tools) {
-        return `
-            <div class="result-list">
-                <h4>可用工具</h4>
-                <ul>
-                    ${tools.map(t => `
-                        <li><strong>${t.name}</strong>: ${t.description}</li>
-                    `).join('')}
-                </ul>
-            </div>
-        `;
+        const items = tools.map(t =>
+            `<li><strong>${t.name}</strong>: ${t.description}</li>`
+        ).join('');
+        return `<div class="result-list"><h4>可用工具</h4><ul>${items}</ul></div>`;
     }
     
     renderHistoryList(history) {
-        return `
-            <div class="result-list">
-                <h4>对话历史</h4>
-                <ul>
-                    ${history.map(h => `
-                        <li>
-                            <span class="msg-type">${h.type}</span>: 
-                            ${this.escapeHtml(h.content.substring(0, 100))}${h.content.length > 100 ? '...' : ''}
-                        </li>
-                    `).join('')}
-                </ul>
-            </div>
-        `;
+        const items = history.map(h =>
+            `<li><span class="msg-type">${h.type}</span>: ${this.escapeHtml(h.content.substring(0, 100))}${h.content.length > 100 ? '...' : ''}</li>`
+        ).join('');
+        return `<div class="result-list"><h4>对话历史</h4><ul>${items}</ul></div>`;
+    }
+
+    renderRoleSwitch(result) {
+        const msg = this.escapeHtml(result.message).replace(/\n/g, '<br>');
+        const skills = result.data.skills;
+        const skillItems = skills.map(s => {
+            const name = s.name || s;
+            const desc = s.description || '';
+            return `<li><strong>${name}</strong>: ${desc}</li>`;
+        }).join('');
+        return `<div class="result-list"><div class="role-switch-msg">${msg}</div>${skills.length ? `<h4>Skills</h4><ul>${skillItems}</ul>` : ''}</div>`;
+    }
+
+    renderRoleInfo(info) {
+        const model = info.model || {};
+        const execution = info.execution || {};
+        const tools = info.available_tools || [];
+        const metadata = info.metadata || {};
+        const metaItems = Object.entries(metadata).map(([k, v]) => `<li><strong>${k}</strong>: ${v}</li>`).join('');
+        return `<div class="result-list"><h4>角色: ${info.name}</h4><p>${info.description}</p><h4>模型配置</h4><ul><li>继承默认配置: ${model.inherit ? '是' : '否'}</li><li>提供商: ${model.provider || '-'}</li><li>模型: ${model.name || '-'}</li><li>Temperature: ${model.temperature || '-'}</li><li>Max Tokens: ${model.max_tokens || '-'}</li></ul><h4>执行参数</h4><ul><li>最大上下文Token: ${execution.max_context_tokens || '-'}</li><li>超时时间: ${execution.timeout || '-'}秒</li><li>递归限制: ${execution.recursion_limit || '-'}</li></ul><h4>可用工具</h4><p>${tools.length ? tools.join(', ') : '全部'}</p>${metaItems ? `<h4>元数据</h4><ul>${metaItems}</ul>` : ''}</div>`;
+    }
+
+    renderPrompt(prompt, truncated) {
+        const display = truncated ? this.escapeHtml(prompt.substring(0, 500)) + '...' : this.escapeHtml(prompt);
+        return `<div class="result-list"><h4>系统提示词</h4><pre>${display}</pre></div>`;
+    }
+
+    renderConfig(data) {
+        const model = data.model || {};
+        const mcp = data.mcp_connected;
+        return `<div class="result-list"><h4>当前配置</h4><ul><li>模型: ${model.provider || '-'}/${model.name || '-'}</li><li>Temperature: ${model.temperature || '-'}</li><li>Max Tokens: ${model.max_tokens || '-'}</li>${mcp !== null && mcp !== undefined ? `<li>MCP状态: ${mcp ? '已连接' : '未连接'}</li>` : ''}</ul></div>`;
     }
 }
 

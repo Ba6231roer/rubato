@@ -124,6 +124,7 @@ class RoleCommand(BaseCommand):
             role = context.role_manager.switch_role(name)
             
             context.agent.context_manager.clear()
+            context.agent.reset_query_engine()
             
             role_skills = None
             if role.tools and role.tools.skills:
@@ -149,10 +150,29 @@ class RoleCommand(BaseCommand):
             if role_skills:
                 skills_info = f"\nSkills: {', '.join(role_skills)}"
             
+            skills_data = []
+            if role_skills:
+                for skill_name in role_skills:
+                    metadata = context.skill_loader.registry.get_skill(skill_name)
+                    if metadata:
+                        skills_data.append({
+                            "name": metadata.name,
+                            "description": metadata.description,
+                            "version": metadata.version,
+                            "triggers": list(metadata.triggers) if metadata.triggers else []
+                        })
+                    else:
+                        skills_data.append({
+                            "name": skill_name,
+                            "description": "Skill元数据未找到",
+                            "version": "",
+                            "triggers": []
+                        })
+            
             return CommandResult(
                 type=ResultType.SUCCESS,
                 message=f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。\n{tools_info}{skills_info}",
-                data={"role": name, "description": role.description, "skills": role_skills}
+                data={"role": name, "description": role.description, "skills": skills_data}
             )
             
         except ConfigValidationError as e:
