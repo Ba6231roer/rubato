@@ -136,15 +136,7 @@ class AgentPool:
         })
 
     def _create_context_manager(self, role_config: Optional[RoleConfig] = None) -> ContextManager:
-        max_tokens = 4000
-        if role_config and role_config.execution:
-            max_tokens = min(4000, role_config.execution.max_context_tokens // 20)
-
-        return ContextManager(
-            max_tokens=max_tokens,
-            keep_recent=4,
-            auto_compress=True
-        )
+        return ContextManager()
 
     def _create_skill_loader(self) -> SkillLoader:
         enabled_skills = None

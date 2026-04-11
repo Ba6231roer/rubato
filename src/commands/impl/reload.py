@@ -30,7 +30,7 @@ class ReloadCommand(BaseCommand):
                     message="没有可重新加载的配置"
                 )
             
-            context.agent.reset_query_engine()
+            context.agent._rebuild_query_engine()
             
             return CommandResult(
                 type=ResultType.SUCCESS,

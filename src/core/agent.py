@@ -1,13 +1,9 @@
 import re
 import json
-from langgraph.prebuilt import create_react_agent
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from typing import List, Optional
 import time
 
-from ..config.loader import ConfigLoader
 from .llm_wrapper import RobustChatOpenAI
 from ..config.models import AppConfig, RoleConfig
 from ..mcp.tools import ToolRegistry
@@ -18,75 +14,12 @@ from .sub_agents import SubAgentManager, create_spawn_agent_tool
 from ..utils.logger import get_llm_logger
 from ..tools.docs import generate_tool_docs_for_prompt
 from .query_engine import QueryEngine, QueryEngineConfig, FileStateCache
-from ..context.compressor import ContextCompressor
-from ..context.tool_result_storage import ToolResultStorage, ContentReplacementState
 
 
-def _content_to_str(content) -> str:
-    """将消息内容转换为字符串"""
-    if isinstance(content, str):
-        return content
-    elif isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                if 'text' in item:
-                    parts.append(item['text'])
-                else:
-                    parts.append(str(item))
-            else:
-                parts.append(str(item))
-        return " ".join(parts)
-    else:
-        return str(content)
 
-
-def _estimate_tokens(messages: List) -> int:
-    import warnings
-    warnings.warn("_estimate_tokens is deprecated, use ContextCompressor.estimate_tokens() instead", DeprecationWarning, stacklevel=2)
-    compressor = ContextCompressor()
-    return compressor.estimate_tokens(messages)
-
-
-def _compress_messages(messages: List, max_tokens: int = 50000, keep_recent: int = 6, 
-                       summary_max_length: int = 300, history_summary_count: int = 10) -> List:
-    import warnings
-    warnings.warn("_compress_messages is deprecated, use ContextCompressor.compress() instead", DeprecationWarning, stacklevel=2)
-    compressor = ContextCompressor(max_context_tokens=max_tokens, keep_recent=keep_recent,
-                                    summary_max_length=summary_max_length, history_summary_count=history_summary_count)
-    return compressor.compress(messages)
-
-
-def _ensure_message_chain_valid(messages: List) -> List:
-    import warnings
-    warnings.warn("_ensure_message_chain_valid is deprecated, use ContextCompressor._ensure_message_chain_valid() instead", DeprecationWarning, stacklevel=2)
-    compressor = ContextCompressor()
-    return compressor._ensure_message_chain_valid(messages)
-
-
-def _convert_messages_for_api(messages: List) -> List:
-    """转换消息格式以兼容DeepSeek API"""
-    converted = []
-    for msg in messages:
-        if isinstance(msg, ToolMessage):
-            converted.append(ToolMessage(
-                content=_content_to_str(msg.content),
-                tool_call_id=msg.tool_call_id
-            ))
-        elif isinstance(msg, AIMessage):
-            converted.append(AIMessage(
-                content=_content_to_str(msg.content),
-                tool_calls=msg.tool_calls if hasattr(msg, 'tool_calls') else []
-            ))
-        else:
-            converted.append(msg)
-    return converted
 
 
 class RubatoAgent:
-    """自然语言驱动的自动化测试执行 Agent"""
     
     def __init__(
         self, 
@@ -120,7 +53,7 @@ class RubatoAgent:
             else config.agent.max_context_tokens
         )
         
-        self.recursion_limit = (
+        self.max_turns = (
             role_config.execution.recursion_limit
             if role_config and role_config.execution and role_config.execution.recursion_limit
             else config.agent.execution.recursion_limit
@@ -151,77 +84,23 @@ class RubatoAgent:
         spawn_agent_tool = create_spawn_agent_tool(self._sub_agent_manager)
         self.tools.append(spawn_agent_tool)
         
-        self.agent = self._create_agent(self._current_system_prompt)
-        
-        self.use_query_engine = (
-            role_config.execution.use_query_engine
-            if role_config and role_config.execution and hasattr(role_config.execution, 'use_query_engine')
-            else False
-        )
-        
-        self._query_engine: Optional[QueryEngine] = None
         self._file_state_cache = FileStateCache()
-        
-        if self.use_query_engine:
-            self._query_engine = self._create_query_engine()
+        self._query_engine: QueryEngine = self._create_query_engine()
         
         self.logger.log_agent_action("agent_initialized", {
             "model": config.model.model.name,
             "tool_count": len(self.tools),
             "max_context_tokens": self.max_context_tokens,
-            "recursion_limit": self.recursion_limit,
-            "compression_enabled": self.compression_config.enabled,
-            "use_query_engine": self.use_query_engine
+            "max_turns": self.max_turns,
+            "compression_enabled": self.compression_config.enabled
         })
     
     def get_role_name(self) -> str:
-        """获取当前角色名称
-        
-        Returns:
-            角色名称，如果没有配置角色则返回 'default'
-        """
         if self.role_config and hasattr(self.role_config, 'name'):
             return self.role_config.name
         return "default"
     
-    def _create_agent(self, system_prompt: str):
-        """创建Agent实例"""
-        def pre_model_hook(state):
-            messages = state.get("messages", [])
-            
-            if self.compression_config.enabled:
-                compressor = ContextCompressor(
-                    max_context_tokens=self.compression_config.max_tokens,
-                    keep_recent=self.compression_config.keep_recent,
-                    summary_max_length=self.compression_config.summary_max_length,
-                    history_summary_count=self.compression_config.history_summary_count,
-                )
-                compressed = compressor.compress(messages)
-            else:
-                compressed = messages
-            
-            converted = _convert_messages_for_api(compressed)
-            
-            if self.logging_config.log_token_estimation:
-                token_estimate = sum(len(str(m.content)) // 4 for m in compressed)
-                self.logger.log_agent_action("pre_model_hook", {
-                    "original_messages": len(messages),
-                    "compressed_messages": len(compressed),
-                    "estimated_tokens": token_estimate,
-                    "compression_enabled": self.compression_config.enabled
-                })
-            
-            return {"llm_input_messages": converted}
-        
-        return create_react_agent(
-            model=self.llm,
-            tools=self.tools,
-            prompt=system_prompt,
-            pre_model_hook=pre_model_hook
-        )
-    
     def _create_query_engine(self) -> QueryEngine:
-        """创建 QueryEngine 实例"""
         def can_use_tool(tool_name: str, args: dict) -> bool:
             return True
         
@@ -249,10 +128,10 @@ class RubatoAgent:
             can_use_tool=can_use_tool,
             get_app_state=get_app_state,
             set_app_state=set_app_state,
-            initial_messages=self.context_manager.get_messages(),
+            initial_messages=[],
             read_file_cache=self._file_state_cache,
             custom_system_prompt=self._current_system_prompt,
-            max_turns=self.recursion_limit,
+            max_turns=self.max_turns,
             model_name=self.config.model.model.name,
             temperature=self.config.model.model.temperature,
             max_tokens=self.config.model.model.max_tokens,
@@ -268,15 +147,17 @@ class RubatoAgent:
         
         return QueryEngine(query_config)
     
-    def _create_llm(self, model_config: Optional['ModelConfig'] = None):
-        """创建LLM实例
+    def _rebuild_query_engine(self) -> None:
+        old_messages = []
+        if self._query_engine is not None:
+            old_messages = self._query_engine.get_messages()
         
-        Args:
-            model_config: 可选的模型配置，如果提供则使用该配置，否则使用默认配置
-            
-        Returns:
-            RobustChatOpenAI: LLM实例（带有重试逻辑）
-        """
+        self._query_engine = self._create_query_engine()
+        
+        if old_messages:
+            self._query_engine.set_messages(old_messages)
+    
+    def _create_llm(self, model_config: Optional['ModelConfig'] = None):
         from ..config.models import ModelConfig
         
         config = model_config if model_config is not None else self.config.model.model
@@ -296,11 +177,6 @@ class RubatoAgent:
         )
     
     def _get_tools_for_role(self) -> List[BaseTool]:
-        """根据角色配置获取可用工具
-        
-        Returns:
-            List[BaseTool]: 工具列表
-        """
         all_tools = self.tool_registry.get_all_tools()
         
         if self.role_config and self.role_config.available_tools:
@@ -320,7 +196,6 @@ class RubatoAgent:
         return all_tools
     
     def _load_system_prompt(self) -> str:
-        """加载系统提示词"""
         if self.role_config and self.role_config.system_prompt_file:
             prompt_file = self.role_config.system_prompt_file
         else:
@@ -340,13 +215,11 @@ class RubatoAgent:
         return base_prompt
     
     def _should_inject_tool_docs(self) -> bool:
-        """检查是否应该注入工具说明"""
         if self.config.tools and hasattr(self.config.tools, 'tool_docs'):
             return self.config.tools.tool_docs.auto_inject
         return True
     
     def _generate_tool_docs(self) -> str:
-        """生成工具说明文档"""
         builtin_tools = []
         all_tools = self.tool_registry.get_all_tools()
         for tool in all_tools:
@@ -397,7 +270,6 @@ class RubatoAgent:
         )
     
     def _get_default_system_prompt(self) -> str:
-        """获取默认系统提示词"""
         return """你是Rubato，一个专业的自动化测试执行助手。
 
 # 角色
@@ -425,14 +297,6 @@ class RubatoAgent:
 """
     
     def _extract_file_paths_from_input(self, user_input: str) -> List[str]:
-        """从用户输入中提取可能的文件路径
-        
-        Args:
-            user_input: 用户输入文本
-            
-        Returns:
-            List[str]: 提取的文件路径列表
-        """
         paths = []
         
         file_patterns = [
@@ -456,7 +320,8 @@ class RubatoAgent:
         return paths
     
     async def run(self, user_input: str) -> str:
-        """运行Agent，使用流式处理记录每个步骤"""
+        from .query_engine import SDKMessage, SubmitOptions
+        
         role_name = self.get_role_name()
         self.logger.set_role_context(role_name)
         self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
@@ -481,98 +346,8 @@ class RubatoAgent:
             self.logger.log_agent_action("loading_skill", {"skill": skill_name})
             enhanced_prompt = await self._inject_skill(skill_name)
             self._current_system_prompt = enhanced_prompt
-            self.agent = self._create_agent(enhanced_prompt)
+            self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
-        
-        if self.use_query_engine and self._query_engine:
-            return await self._run_with_query_engine(user_input)
-        
-        self.context_manager.add_user_message(user_input)
-        
-        messages = self.context_manager.get_messages()
-        
-        self.logger.log_request(messages, self.config.model.model.name)
-        
-        start_time = time.time()
-        step_count = 0
-        
-        try:
-            final_content = ""
-            
-            async for event in self.agent.astream(
-                {"messages": messages},
-                stream_mode="updates",
-                config={"recursion_limit": self.recursion_limit}
-            ):
-                step_count += 1
-                
-                if event is None:
-                    self.logger.log_agent_action("event_none", {
-                        "step": step_count,
-                        "warning": "Received None event from astream"
-                    })
-                    continue
-                
-                self.logger.log_agent_action("stream_event", {
-                    "step": step_count,
-                    "event_keys": list(event.keys())
-                })
-                
-                for node_name, node_output in event.items():
-                    self.logger.log_agent_action("node_output", {
-                        "step": step_count,
-                        "node": node_name
-                    })
-                    
-                    if "messages" in node_output:
-                        for msg in node_output["messages"]:
-                            if isinstance(msg, AIMessage):
-                                self.context_manager.add_ai_message_full(msg)
-                                self.logger.log_response(msg, self.config.model.model.name)
-                                
-                                if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                                    for tc in msg.tool_calls:
-                                        self.logger.log_tool_call(tc["name"], tc["args"])
-                                
-                                content_str = _content_to_str(msg.content)
-                                if content_str:
-                                    final_content = content_str
-                                    
-                            elif isinstance(msg, ToolMessage):
-                                content_str = _content_to_str(msg.content)
-                                self.context_manager.add_tool_message(content_str, msg.tool_call_id)
-                                self.logger.log_tool_result("tool_message", content_str)
-            
-            elapsed = time.time() - start_time
-            self.logger.log_agent_action("stream_complete", {
-                "elapsed_seconds": round(elapsed, 2),
-                "total_steps": step_count
-            })
-            
-            return final_content if final_content else "任务已完成"
-            
-        except Exception as e:
-            import traceback
-            self.logger.log_error("agent_invoke", e)
-            self.logger.log_agent_action("agent_invoke_error_details", {
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-                "traceback": traceback.format_exc()
-            })
-            raise
-    
-    async def _run_with_query_engine(self, user_input: str) -> str:
-        """使用 QueryEngine 运行 Agent
-        
-        Args:
-            user_input: 用户输入
-            
-        Returns:
-            str: 最终响应
-        """
-        from .query_engine import SDKMessage, SubmitOptions
-        
-        self.context_manager.add_user_message(user_input)
         
         self._query_engine = self._create_query_engine()
         
@@ -616,8 +391,6 @@ class RubatoAgent:
                     
                 elif message.type == "result":
                     final_content = message.content if isinstance(message.content, str) else final_content
-                    
-            self.sync_query_engine_messages()
             
             elapsed = time.time() - start_time
             usage = self._query_engine.get_usage()
@@ -641,7 +414,8 @@ class RubatoAgent:
             raise
     
     async def run_stream(self, user_input: str):
-        """运行Agent，流式返回响应内容（用于WebSocket）"""
+        from .query_engine import SDKMessage, SubmitOptions
+        
         role_name = self.get_role_name()
         self.logger.set_role_context(role_name)
         self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
@@ -667,91 +441,8 @@ class RubatoAgent:
             self.logger.log_agent_action("loading_skill", {"skill": skill_name})
             enhanced_prompt = await self._inject_skill(skill_name)
             self._current_system_prompt = enhanced_prompt
-            self.agent = self._create_agent(enhanced_prompt)
+            self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
-        
-        if self.use_query_engine and self._query_engine:
-            async for content in self._run_stream_with_query_engine(user_input):
-                yield content
-            return
-        
-        self.context_manager.add_user_message(user_input)
-        messages = self.context_manager.get_messages()
-        
-        self.logger.log_request(messages, self.config.model.model.name)
-        
-        start_time = time.time()
-        step_count = 0
-        
-        try:
-            final_content = ""
-            
-            async for event in self.agent.astream(
-                {"messages": messages},
-                stream_mode="updates",
-                config={"recursion_limit": self.recursion_limit}
-            ):
-                step_count += 1
-                
-                if event is None:
-                    self.logger.log_agent_action("event_none", {
-                        "step": step_count,
-                        "warning": "Received None event from astream"
-                    })
-                    continue
-                
-                for node_name, node_output in event.items():
-                    if "messages" in node_output:
-                        for msg in node_output["messages"]:
-                            if isinstance(msg, AIMessage):
-                                self.context_manager.add_ai_message_full(msg)
-                                self.logger.log_response(msg, self.config.model.model.name)
-                                
-                                if hasattr(msg, 'tool_calls') and msg.tool_calls:
-                                    for tc in msg.tool_calls:
-                                        self.logger.log_tool_call(tc["name"], tc["args"])
-                                
-                                content_str = _content_to_str(msg.content)
-                                if content_str:
-                                    final_content = content_str
-                                    yield content_str
-                                    
-                            elif isinstance(msg, ToolMessage):
-                                content_str = _content_to_str(msg.content)
-                                self.context_manager.add_tool_message(content_str, msg.tool_call_id)
-                                self.logger.log_tool_result("tool_message", content_str)
-            
-            elapsed = time.time() - start_time
-            self.logger.log_agent_action("stream_complete", {
-                "elapsed_seconds": round(elapsed, 2),
-                "total_steps": step_count
-            })
-            
-            if not final_content:
-                yield "任务已完成"
-            
-        except Exception as e:
-            import traceback
-            self.logger.log_error("agent_invoke", e)
-            self.logger.log_agent_action("agent_invoke_error_details", {
-                "error_type": type(e).__name__,
-                "error_message": str(e),
-                "traceback": traceback.format_exc()
-            })
-            yield f"执行错误: {str(e)}"
-    
-    async def _run_stream_with_query_engine(self, user_input: str):
-        """使用 QueryEngine 流式运行 Agent
-        
-        Args:
-            user_input: 用户输入
-            
-        Yields:
-            str: 流式响应内容
-        """
-        from .query_engine import SDKMessage, SubmitOptions
-        
-        self.context_manager.add_user_message(user_input)
         
         self._query_engine = self._create_query_engine()
         
@@ -806,15 +497,6 @@ class RubatoAgent:
                     if isinstance(message.content, str) and message.content:
                         final_content = message.content
             
-            for msg in self._query_engine.get_messages():
-                if isinstance(msg, AIMessage):
-                    self.context_manager.add_ai_message_full(msg)
-                elif isinstance(msg, ToolMessage):
-                    self.context_manager.add_tool_message(
-                        _content_to_str(msg.content),
-                        msg.tool_call_id
-                    )
-            
             elapsed = time.time() - start_time
             usage = self._query_engine.get_usage()
             
@@ -838,38 +520,22 @@ class RubatoAgent:
             yield f"执行错误: {str(e)}"
     
     async def _inject_skill(self, skill_name: str) -> str:
-        """将Skill内容注入到提示词中"""
         skill_content = await self.skill_loader.load_full_skill(skill_name)
         
         return f"{self._current_system_prompt}\n\n# 当前加载的Skill\n\n## {skill_name}\n\n{skill_content}\n\n---\n请根据这个Skill的指导，处理用户的请求。"
     
     def get_system_prompt(self) -> str:
-        """获取当前系统提示词（包含工具说明）"""
         return self._current_system_prompt
     
     def get_current_system_prompt(self) -> str:
-        """获取当前系统提示词（包含工具说明）"""
         return self._current_system_prompt
     
     def get_loaded_skills(self) -> List[str]:
-        """获取已加载的Skills"""
         return self.context_manager.get_loaded_skills()
     
     def _reload_execution_config(self) -> dict:
-        """重新加载执行配置
-        
-        根据 role_config 更新所有 RoleExecutionConfig 相关属性：
-        - max_context_tokens
-        - recursion_limit
-        - sub_agent_recursion_limit（需要重建 SubAgentManager）
-        - use_query_engine（需要重建 QueryEngine）
-        
-        Returns:
-            dict: 配置变更记录，用于日志
-        """
         old_values = {
-            "recursion_limit": self.recursion_limit,
-            "use_query_engine": self.use_query_engine,
+            "max_turns": self.max_turns,
             "sub_agent_recursion_limit": self._sub_agent_manager.recursion_limit,
             "max_context_tokens": self.max_context_tokens
         }
@@ -883,7 +549,7 @@ class RubatoAgent:
                 else self.config.agent.max_context_tokens
             )
             
-            self.recursion_limit = (
+            self.max_turns = (
                 exec_config.recursion_limit
                 if exec_config.recursion_limit
                 else self.config.agent.execution.recursion_limit
@@ -894,17 +560,10 @@ class RubatoAgent:
                 if exec_config.sub_agent_recursion_limit
                 else self.config.agent.execution.sub_agent_recursion_limit
             )
-            
-            self.use_query_engine = (
-                exec_config.use_query_engine
-                if hasattr(exec_config, 'use_query_engine')
-                else False
-            )
         else:
             self.max_context_tokens = self.config.agent.max_context_tokens
-            self.recursion_limit = self.config.agent.execution.recursion_limit
+            self.max_turns = self.config.agent.execution.recursion_limit
             sub_agent_recursion_limit = self.config.agent.execution.sub_agent_recursion_limit
-            self.use_query_engine = False
         
         if sub_agent_recursion_limit != old_values["sub_agent_recursion_limit"]:
             self._sub_agent_manager = SubAgentManager(
@@ -917,24 +576,15 @@ class RubatoAgent:
             self.tools = [t for t in self.tools if t.name != 'spawn_agent']
             self.tools.append(spawn_agent_tool)
         
-        if self.use_query_engine:
-            self._query_engine = self._create_query_engine()
-        else:
-            self._query_engine = None
+        self._rebuild_query_engine()
         
         return {
-            "recursion_limit": {"old": old_values["recursion_limit"], "new": self.recursion_limit},
-            "use_query_engine": {"old": old_values["use_query_engine"], "new": self.use_query_engine},
+            "max_turns": {"old": old_values["max_turns"], "new": self.max_turns},
             "sub_agent_recursion_limit": {"old": old_values["sub_agent_recursion_limit"], "new": self._sub_agent_manager.recursion_limit},
             "max_context_tokens": {"old": old_values["max_context_tokens"], "new": self.max_context_tokens}
         }
     
     def reload_system_prompt(self, role_config: Optional[RoleConfig] = None) -> None:
-        """重新加载系统提示词（含工具说明注入）
-        
-        Args:
-            role_config: 新的角色配置（可选，为 None 时重新加载当前角色的提示词）
-        """
         if role_config is not None:
             self.role_config = role_config
             if role_config.tools and role_config.tools.skills:
@@ -945,7 +595,7 @@ class RubatoAgent:
             config_changes = self._reload_execution_config()
         
         self._current_system_prompt = self._load_system_prompt()
-        self.agent = self._create_agent(self._current_system_prompt)
+        self._rebuild_query_engine()
         
         log_data = {
             "role_config_updated": role_config is not None,
@@ -957,18 +607,13 @@ class RubatoAgent:
         self.logger.log_agent_action("system_prompt_reloaded", log_data)
     
     def reload_tools(self, tool_registry: ToolRegistry) -> None:
-        """重新加载工具列表
-        
-        Args:
-            tool_registry: 新的工具注册表
-        """
         self.tool_registry = tool_registry
         
         self.tools = self._get_tools_for_role()
         
         config_changes = self._reload_execution_config()
         
-        self.agent = self._create_agent(self._current_system_prompt)
+        self._rebuild_query_engine()
         
         self.logger.log_agent_action("tools_reloaded", {
             "tool_count": len(self.tools),
@@ -977,14 +622,9 @@ class RubatoAgent:
         })
     
     def update_role_skills(self, skills: Optional[List[str]]) -> None:
-        """更新角色的 skills 配置并重新生成系统提示词
-        
-        Args:
-            skills: 角色配置的 skills 列表，为 None 时使用全局配置（不过滤）
-        """
         self._role_skills = skills
         self._current_system_prompt = self._load_system_prompt()
-        self.agent = self._create_agent(self._current_system_prompt)
+        self._rebuild_query_engine()
         
         self.logger.log_agent_action("role_skills_updated", {
             "skills": skills,
@@ -992,16 +632,11 @@ class RubatoAgent:
         })
     
     async def load_role_skills(self, skills: Optional[List[str]]) -> None:
-        """异步加载角色配置的 skills 全文并注入到系统提示词
-        
-        Args:
-            skills: 角色配置的 skills 列表
-        """
         self._role_skills = skills
         
         if not skills or not self.skill_loader:
             self._current_system_prompt = self._load_system_prompt()
-            self.agent = self._create_agent(self._current_system_prompt)
+            self._rebuild_query_engine()
             return
         
         skill_contents = []
@@ -1027,7 +662,7 @@ class RubatoAgent:
         else:
             self._current_system_prompt = self._load_system_prompt()
         
-        self.agent = self._create_agent(self._current_system_prompt)
+        self._rebuild_query_engine()
         
         self.logger.log_agent_action("role_skills_loaded", {
             "skills": skills,
@@ -1036,30 +671,13 @@ class RubatoAgent:
     
     def clear_context(self) -> None:
         self.context_manager.clear()
-        if self._query_engine is not None:
-            self._query_engine.clear_messages()
+        self._query_engine = self._create_query_engine()
     
-    def sync_query_engine_messages(self) -> None:
-        if self._query_engine is not None:
-            messages = self._query_engine.get_messages()
-            self.context_manager.set_messages(messages)
-
-    def reset_query_engine(self) -> None:
-        self._query_engine = None
-
     def interrupt(self, reason: str = "用户中断") -> None:
         if self._query_engine is not None and self._query_engine.is_running():
             self._query_engine.interrupt(reason)
-
+    
     def activate_skills_for_paths(self, file_paths: List[str]) -> List[str]:
-        """激活匹配文件路径的条件 Skills
-        
-        Args:
-            file_paths: 用户正在操作的文件路径列表
-            
-        Returns:
-            List[str]: 激活的 Skill 名称列表
-        """
         if not isinstance(self.skill_loader, SkillManager):
             self.logger.log_agent_action("skill_manager_not_available", {
                 "message": "SkillLoader is not SkillManager, skipping conditional activation"
@@ -1087,11 +705,6 @@ class RubatoAgent:
         return activated
     
     def get_skill_manager_stats(self) -> dict:
-        """获取 SkillManager 统计信息
-        
-        Returns:
-            dict: 包含条件 Skills、动态 Skills 和已发现目录的数量
-        """
         if not isinstance(self.skill_loader, SkillManager):
             return {
                 "is_skill_manager": False,
@@ -1108,7 +721,6 @@ class RubatoAgent:
         }
     
     def update_config(self, new_config: AppConfig) -> None:
-        """更新配置（支持热重载）"""
         self.config = new_config
         
         self.max_context_tokens = (
@@ -1117,7 +729,7 @@ class RubatoAgent:
             else new_config.agent.max_context_tokens
         )
         
-        self.recursion_limit = (
+        self.max_turns = (
             self.role_config.execution.recursion_limit
             if self.role_config and self.role_config.execution and self.role_config.execution.recursion_limit
             else new_config.agent.execution.recursion_limit
@@ -1128,6 +740,6 @@ class RubatoAgent:
         
         self.logger.log_agent_action("config_updated", {
             "max_context_tokens": self.max_context_tokens,
-            "recursion_limit": self.recursion_limit,
+            "max_turns": self.max_turns,
             "compression_enabled": self.compression_config.enabled
         })

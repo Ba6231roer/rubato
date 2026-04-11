@@ -852,6 +852,9 @@ class QueryEngine:
         """
         self.mutable_messages.append(message)
     
+    def set_messages(self, messages: List[BaseMessage]) -> None:
+        self.mutable_messages = list(messages)
+    
     def get_tool_names(self) -> List[str]:
         """获取所有工具名称
         

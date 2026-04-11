@@ -157,7 +157,7 @@ Skill管理：
     
     def _cmd_history(self, args: str) -> str:
         """显示对话历史"""
-        messages = self.agent.context_manager.get_messages()
+        messages = self.agent._query_engine.get_messages()
         
         if not messages:
             return "对话历史为空"
@@ -355,8 +355,7 @@ Skill管理：
             
             role = self.role_manager.switch_role(name)
             
-            self.agent.context_manager.clear()
-            self.agent.reset_query_engine()
+            self.agent.clear_context()
             
             role_skills = None
             if role.tools and role.tools.skills:
@@ -440,8 +439,7 @@ Skill管理：
     async def _cmd_new(self, args: str) -> str:
         """清空当前对话历史，开始新对话"""
         try:
-            self.agent.context_manager.clear()
-            self.agent.reset_query_engine()
+            self.agent.clear_context()
             
             current_role = self.role_manager.get_current_role() if self.role_manager else None
             if current_role:
@@ -472,7 +470,7 @@ Skill管理：
             if not results:
                 return "没有可重新加载的配置"
             
-            self.agent.reset_query_engine()
+            self.agent._rebuild_query_engine()
             
             return "配置重新加载完成：\n" + "\n".join(results)
             

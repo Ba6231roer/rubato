@@ -94,9 +94,6 @@ model:
 # 执行参数配置
 # ====================
 execution:
-  # 是否启用claude code模式工作流引擎
-  use_query_engine: true
-
   # 最大上下文 token 数
   # - 控制对话历史的最大长度
   # - 默认: 80000

@@ -4,7 +4,6 @@ system_prompt_file: prompts/roles/test_case_executor.txt
 model:
   inherit: true
 execution:
-  use_query_engine: true
   max_context_tokens: 80000
   timeout: 300
   recursion_limit: 1000

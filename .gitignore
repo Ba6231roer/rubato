@@ -69,4 +69,5 @@ config/model_config_local.yaml
 test_case_path/
 knowledge_path/
 .obsidian/
+CLAUDE.md
 

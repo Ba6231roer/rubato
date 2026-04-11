@@ -90,10 +90,6 @@ class SubAgentExecutionConfig(BaseModel):
         default=None,
         description="最大上下文 token 数"
     )
-    use_query_engine: bool = Field(
-        default=False,
-        description="是否使用 Query Engine"
-    )
 
 
 class SubAgentModelConfig(BaseModel):
@@ -291,10 +287,6 @@ class SubAgentSpawnOptions(BaseModel):
     timeout: Optional[int] = Field(
         default=None,
         description="执行超时时间（秒）"
-    )
-    use_query_engine: Optional[bool] = Field(
-        default=None,
-        description="是否使用 Query Engine"
     )
     tool_inheritance: Optional[ToolInheritanceMode] = Field(
         default=None,

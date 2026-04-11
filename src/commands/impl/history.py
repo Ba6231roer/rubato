@@ -15,7 +15,7 @@ class HistoryCommand(BaseCommand):
                 message="Agent未初始化"
             )
         
-        messages = context.agent.context_manager.get_messages()
+        messages = context.agent._query_engine.get_messages()
         
         if not messages:
             return CommandResult(

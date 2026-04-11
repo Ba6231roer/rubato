@@ -7,7 +7,6 @@ SubAgent 管理器
 import asyncio
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
-from langgraph.prebuilt import create_react_agent
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -16,6 +15,7 @@ import yaml
 from ..config.models import RoleConfig
 from ..utils.logger import get_llm_logger
 from ..tools.docs import generate_tool_docs_for_prompt
+from .query_engine import QueryEngine, QueryEngineConfig, SubmitOptions, SDKMessage
 from .sub_agent_types import (
     SubAgentDefinition,
     SubAgentExecutionConfig,
@@ -324,14 +324,16 @@ class SubAgentManager:
         
         if options.timeout is not None:
             definition.execution.timeout = options.timeout
-        if options.use_query_engine is not None:
-            definition.execution.use_query_engine = options.use_query_engine
         if options.tool_inheritance is not None:
             definition.tool_inheritance = options.tool_inheritance
         if options.available_tools is not None:
             definition.available_tools = options.available_tools
         
         tools = self._resolve_tools(definition)
+        
+        tools = self._filter_spawn_agent_by_depth(
+            tools, options.session_id, options.max_recursion_depth
+        )
         
         system_prompt = await self._build_system_prompt(definition, tools)
         
@@ -382,12 +384,15 @@ class SubAgentManager:
             available_tools=options.available_tools,
             execution=SubAgentExecutionConfig(
                 timeout=options.timeout or 120,
-                recursion_limit=self.recursion_limit,
-                use_query_engine=options.use_query_engine or False
+                recursion_limit=self.recursion_limit
             )
         )
         
         tools = self._resolve_tools(definition)
+        
+        tools = self._filter_spawn_agent_by_depth(
+            tools, options.session_id, options.max_recursion_depth
+        )
         
         llm = self._create_llm(definition)
         
@@ -534,8 +539,7 @@ class SubAgentManager:
             model=model_config,
             execution=SubAgentExecutionConfig(
                 timeout=role_config.execution.timeout if role_config.execution else 300,
-                recursion_limit=role_config.execution.recursion_limit if role_config.execution else self.recursion_limit,
-                use_query_engine=role_config.execution.use_query_engine if role_config.execution else False
+                recursion_limit=role_config.execution.recursion_limit if role_config.execution else self.recursion_limit
             ),
             tool_inheritance=ToolInheritanceMode.INHERIT_SELECTED,
             available_tools=available_tools if available_tools else None,
@@ -578,6 +582,42 @@ class SubAgentManager:
             tool_registry=self.parent_agent.tool_registry,
             available_tools=definition.available_tools
         )
+        
+        return tools
+    
+    def _filter_spawn_agent_by_depth(
+        self,
+        tools: List[BaseTool],
+        session_id: Optional[str],
+        max_recursion_depth: int
+    ) -> List[BaseTool]:
+        """根据递归深度过滤 spawn_agent 工具
+        
+        当子智能体已达到最大递归深度时，移除 spawn_agent 工具，
+        从算法层面限制递归创建，而非运行时返回错误。
+        
+        Args:
+            tools: 工具列表
+            session_id: 会话 ID
+            max_recursion_depth: 最大递归深度
+            
+        Returns:
+            过滤后的工具列表
+        """
+        if not session_id:
+            return tools
+        
+        current_depth = self.get_current_depth(session_id)
+        if current_depth >= max_recursion_depth:
+            filtered = [t for t in tools if t.name != 'spawn_agent']
+            self._logger.log_agent_action("spawn_agent_filtered_by_depth", {
+                "session_id": session_id,
+                "current_depth": current_depth,
+                "max_recursion_depth": max_recursion_depth,
+                "original_tool_count": len(tools),
+                "filtered_tool_count": len(filtered)
+            })
+            return filtered
         
         return tools
     
@@ -737,8 +777,11 @@ class SubAgentManager:
         tools: List[BaseTool],
         system_prompt: str,
         definition: SubAgentDefinition
-    ) -> Any:
-        """创建 Agent 实例
+    ) -> QueryEngine:
+        """创建 QueryEngine 实例
+        
+        SubAgent 使用与主 Agent 相同的 QueryEngine 引擎，
+        仅通过递归深度算法限制子智能体的递归创建。
         
         Args:
             llm: LLM 实例
@@ -747,25 +790,66 @@ class SubAgentManager:
             definition: SubAgent 定义
             
         Returns:
-            Agent 实例
+            QueryEngine 实例
         """
-        return create_react_agent(
-            model=llm,
+        parent_cwd = "."
+        if hasattr(self.parent_agent, 'config') and hasattr(self.parent_agent.config, 'project'):
+            parent_cwd = str(self.parent_agent.config.project.root) if self.parent_agent.config.project else "."
+        
+        compression_enabled = True
+        if hasattr(self.parent_agent, 'compression_config'):
+            compression_enabled = self.parent_agent.compression_config.enabled
+        
+        max_context_tokens = definition.execution.max_context_tokens or 80000
+        
+        model_name = None
+        temperature = 0.7
+        max_tokens = None
+        if definition.model.inherit:
+            if hasattr(self.parent_agent, 'config'):
+                parent_model = self.parent_agent.config.model.model
+                model_name = parent_model.name
+                temperature = parent_model.temperature
+                max_tokens = parent_model.max_tokens
+        else:
+            model_name = definition.model.name
+            temperature = definition.model.temperature or 0.7
+            max_tokens = definition.model.max_tokens
+        
+        query_config = QueryEngineConfig(
+            cwd=parent_cwd,
+            llm=llm,
             tools=tools,
-            prompt=system_prompt
+            skills=[],
+            can_use_tool=lambda tool_name, args: True,
+            get_app_state=lambda: {},
+            set_app_state=lambda state: None,
+            initial_messages=[],
+            custom_system_prompt=system_prompt,
+            max_turns=definition.execution.recursion_limit,
+            model_name=model_name,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            compression_enabled=compression_enabled,
+            max_context_tokens=max_context_tokens,
         )
+        
+        return QueryEngine(query_config)
     
     async def _execute_sub_agent(
         self,
-        sub_agent: Any,
+        sub_agent: QueryEngine,
         task: str,
         definition: SubAgentDefinition,
         session_id: Optional[str] = None
     ) -> str:
         """执行 SubAgent
         
+        使用 QueryEngine 的 submit_message 方法执行子智能体任务，
+        与主 Agent 使用完全相同的引擎工作方式。
+        
         Args:
-            sub_agent: Agent 实例
+            sub_agent: QueryEngine 实例
             task: 任务描述
             definition: SubAgent 定义
             session_id: 会话 ID
@@ -793,15 +877,13 @@ class SubAgentManager:
         last_error = None
         for attempt in range(definition.execution.max_retries + 1):
             try:
-                result = await asyncio.wait_for(
-                    sub_agent.ainvoke(
-                        {"messages": [HumanMessage(content=task)]},
-                        config={"recursion_limit": definition.execution.recursion_limit}
-                    ),
+                if attempt > 0:
+                    sub_agent = QueryEngine(sub_agent.config)
+                
+                final_result = await asyncio.wait_for(
+                    self._collect_query_result(sub_agent, task),
                     timeout=definition.execution.timeout
                 )
-                
-                final_result = result["messages"][-1].content
                 
                 self._logger.log_agent_action("sub_agent_execution_success", {
                     "name": definition.name,
@@ -830,6 +912,36 @@ class SubAgentManager:
                 await asyncio.sleep(1)
         
         return f"错误：{last_error}，已重试{definition.execution.max_retries}次"
+    
+    async def _collect_query_result(
+        self,
+        query_engine: QueryEngine,
+        task: str
+    ) -> str:
+        """收集 QueryEngine 的执行结果
+        
+        Args:
+            query_engine: QueryEngine 实例
+            task: 任务描述
+            
+        Returns:
+            最终执行结果
+        """
+        final_result = None
+        async for message in query_engine.submit_message(task, SubmitOptions(stream=False)):
+            if message.type == "result":
+                final_result = message.content if isinstance(message.content, str) else str(message.content)
+            elif message.type == "error":
+                error_content = message.content
+                if isinstance(error_content, dict):
+                    raise Exception(error_content.get("message", str(error_content)))
+                else:
+                    raise Exception(str(error_content))
+        
+        if final_result is None:
+            final_result = query_engine._get_final_result()
+        
+        return final_result
     
     async def _generate_system_prompt(
         self,
@@ -924,7 +1036,6 @@ def create_spawn_agent_tool(sub_agent_manager: SubAgentManager):
         session_id: Optional[str] = None,
         max_recursion_depth: int = 5,
         timeout: Optional[int] = None,
-        use_query_engine: Optional[bool] = None,
         tool_inheritance: Optional[str] = None,
         available_tools: Optional[List[str]] = None
     ) -> str:
@@ -955,8 +1066,6 @@ def create_spawn_agent_tool(sub_agent_manager: SubAgentManager):
             max_recursion_depth: 最大递归深度（默认 5）
             
             timeout: 执行超时时间（秒），默认使用配置中的值
-            
-            use_query_engine: 是否使用 Query Engine，默认使用配置中的值
             
             tool_inheritance: 工具继承模式
                 - "inherit_all": 继承所有父工具
@@ -1003,7 +1112,6 @@ def create_spawn_agent_tool(sub_agent_manager: SubAgentManager):
             session_id=session_id,
             max_recursion_depth=max_recursion_depth,
             timeout=timeout,
-            use_query_engine=use_query_engine,
             tool_inheritance=inheritance_mode,
             available_tools=available_tools
         )

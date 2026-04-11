@@ -123,8 +123,7 @@ class RoleCommand(BaseCommand):
             
             role = context.role_manager.switch_role(name)
             
-            context.agent.context_manager.clear()
-            context.agent.reset_query_engine()
+            context.agent.clear_context()
             
             role_skills = None
             if role.tools and role.tools.skills:

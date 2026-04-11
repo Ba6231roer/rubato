@@ -16,8 +16,7 @@ class NewCommand(BaseCommand):
             )
         
         try:
-            context.agent.context_manager.clear()
-            context.agent.reset_query_engine()
+            context.agent.clear_context()
             
             current_role = context.role_manager.get_current_role() if context.role_manager else None
             if current_role:
