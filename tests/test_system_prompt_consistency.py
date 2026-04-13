@@ -73,7 +73,7 @@ def create_mock_tool_registry() -> ToolRegistry:
 
 def create_mock_context_manager() -> ContextManager:
     """创建模拟的 ContextManager"""
-    return ContextManager(max_tokens=80000, auto_compress=False)
+    return ContextManager()
 
 
 def test_get_system_prompt_consistency():
@@ -209,14 +209,14 @@ def test_initialization_consistency():
             tool_registry=tool_registry
         )
     
-    system_prompt_attr = agent.system_prompt
+    system_prompt_attr = agent.get_current_system_prompt()
     current_system_prompt_attr = agent._current_system_prompt
     
-    print(f"[OK] system_prompt 属性长度: {len(system_prompt_attr)} 字符")
+    print(f"[OK] get_current_system_prompt() 长度: {len(system_prompt_attr)} 字符")
     print(f"[OK] _current_system_prompt 属性长度: {len(current_system_prompt_attr)} 字符")
-    print(f"[OK] 两个属性值是否相同: {system_prompt_attr == current_system_prompt_attr}")
+    print(f"[OK] 两个值是否相同: {system_prompt_attr == current_system_prompt_attr}")
     
-    assert system_prompt_attr == current_system_prompt_attr, "初始化时，system_prompt 和 _current_system_prompt 应该相同"
+    assert system_prompt_attr == current_system_prompt_attr, "初始化时，get_current_system_prompt() 和 _current_system_prompt 应该相同"
     print("[OK] 测试通过：初始化时属性一致\n")
 
 
@@ -246,15 +246,14 @@ def test_multiple_operations():
         
         prompt1 = agent.get_system_prompt()
         prompt2 = agent.get_current_system_prompt()
-        attr1 = agent.system_prompt
         attr2 = agent._current_system_prompt
         
         print(f"  第 {i+1} 次更新后:")
         print(f"    - get_system_prompt() == get_current_system_prompt(): {prompt1 == prompt2}")
-        print(f"    - system_prompt == _current_system_prompt: {attr1 == attr2}")
-        print(f"    - 所有值一致: {prompt1 == prompt2 == attr1 == attr2}")
+        print(f"    - get_current_system_prompt() == _current_system_prompt: {prompt2 == attr2}")
+        print(f"    - 所有值一致: {prompt1 == prompt2 == attr2}")
         
-        assert prompt1 == prompt2 == attr1 == attr2, f"第 {i+1} 次更新后，所有值应该保持一致"
+        assert prompt1 == prompt2 == attr2, f"第 {i+1} 次更新后，所有值应该保持一致"
     
     print("[OK] 测试通过：多次操作后属性保持一致\n")
 

@@ -43,7 +43,12 @@ class ContextCompressor:
         self._last_api_usage_tokens: int = 0
         self._consecutive_failures: int = 0
 
-    def _get_content_str(self, content) -> str:
+    @staticmethod
+    def _truncate_content(content_str: str, max_len: int = 200) -> str:
+        return content_str[:max_len] + "..." if len(content_str) > max_len else content_str
+
+    @staticmethod
+    def _get_content_str(content) -> str:
         if isinstance(content, str):
             return content
         elif isinstance(content, list):
@@ -118,9 +123,7 @@ class ContextCompressor:
         if not tool_messages:
             return messages, 0
 
-        recent_tool_ids = set()
-        for _, msg in tool_messages[-self.snip_keep_recent:]:
-            recent_tool_ids.add(msg.tool_call_id)
+        recent_tool_ids = {msg.tool_call_id for _, msg in tool_messages[-self.snip_keep_recent:]}
 
         modified_messages = list(messages)
         tokens_freed = 0
@@ -145,7 +148,6 @@ class ContextCompressor:
 
         messages_to_summarize = self._strip_images_from_messages(messages)
 
-        from .compact_prompt import get_compact_prompt, format_compact_summary, get_compact_user_summary_message
         compact_prompt = get_compact_prompt()
 
         summary_text = await self._call_llm_for_summary(messages_to_summarize, compact_prompt)
@@ -212,7 +214,7 @@ class ContextCompressor:
                 new_blocks = []
                 for block in msg.content:
                     if isinstance(block, dict):
-                        if block.get('type') == 'image_url' or block.get('type') == 'image':
+                        if block.get('type') in ('image_url', 'image'):
                             new_blocks.append({'type': 'text', 'text': '[image]'})
                         elif block.get('type') == 'document' or (block.get('type') == 'file' and block.get('source', {}).get('type') == 'base64'):
                             new_blocks.append({'type': 'text', 'text': '[document]'})
@@ -247,8 +249,7 @@ class ContextCompressor:
                     valid_messages.append(msg)
                     pending_tool_call_ids.discard(msg.tool_call_id)
                 else:
-                    content_str = self._get_content_str(msg.content)
-                    content = content_str[:200] + "..." if len(content_str) > 200 else content_str
+                    content = self._truncate_content(self._get_content_str(msg.content))
                     valid_messages.append(HumanMessage(content=f"[工具结果摘要]: {content}"))
             else:
                 valid_messages.append(msg)
@@ -299,11 +300,7 @@ class ContextCompressor:
         groups = self._group_messages_by_api_round(messages)
         if len(groups) <= 1:
             return messages
-        truncated = groups[1:]
-        result = []
-        for group in truncated:
-            result.extend(group)
-        return result
+        return [msg for group in groups[1:] for msg in group]
 
     def _group_messages_by_api_round(self, messages: List[BaseMessage]) -> List[List[BaseMessage]]:
         groups: List[List[BaseMessage]] = []
@@ -332,8 +329,7 @@ class ContextCompressor:
         summary_parts = []
         for msg in messages:
             role = "用户" if isinstance(msg, HumanMessage) else "助手"
-            content_str = self._get_content_str(msg.content)
-            content = content_str[:200] + "..." if len(content_str) > 200 else content_str
+            content = self._truncate_content(self._get_content_str(msg.content))
             summary_parts.append(f"[{role}]: {content}")
 
         summary_content = f"[历史摘要]\n" + "\n".join(summary_parts)

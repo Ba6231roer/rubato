@@ -1,4 +1,4 @@
-from typing import Dict, Callable, Optional, Awaitable
+from typing import Dict, Callable, Optional, Awaitable, Tuple
 from ..core.agent import RubatoAgent
 from ..core.role_manager import RoleManager
 from ..core.agent_pool import AgentPool
@@ -46,52 +46,56 @@ class CommandHandler:
         self._running = True
     
     def is_running(self) -> bool:
-        """检查是否继续运行"""
         return self._running
-    
+
+    @staticmethod
+    def _parse_command_input(user_input: str) -> Optional[Tuple[str, str]]:
+        user_input = user_input.strip()
+        if not user_input or not user_input.startswith('/'):
+            return None
+        cmd_parts = user_input[1:].split(maxsplit=1)
+        cmd = cmd_parts[0].lower()
+        args = cmd_parts[1] if len(cmd_parts) > 1 else ""
+        return cmd, args
+
+    @staticmethod
+    def _parse_sub_cmd(args: str) -> Tuple[str, str]:
+        parts = args.split(maxsplit=1)
+        sub_cmd = parts[0].lower() if parts else ""
+        sub_args = parts[1] if len(parts) > 1 else ""
+        return sub_cmd, sub_args
+
+    @staticmethod
+    def _truncate(text: str, max_len: int) -> str:
+        return text[:max_len] + "..." if len(text) > max_len else text
+
     async def handle_async(self, user_input: str) -> Optional[str]:
-        """异步处理用户输入"""
-        user_input = user_input.strip()
-        
-        if not user_input:
+        parsed = self._parse_command_input(user_input)
+        if parsed is None:
             return None
-        
-        if user_input.startswith('/'):
-            cmd_parts = user_input[1:].split(maxsplit=1)
-            cmd = cmd_parts[0].lower()
-            args = cmd_parts[1] if len(cmd_parts) > 1 else ""
-            
-            if cmd in self.commands:
-                result = self.commands[cmd](args)
-                if asyncio.iscoroutine(result):
-                    return await result
-                return result
-            else:
-                return f"未知命令：{cmd}。输入 /help 查看帮助。"
-        
-        return None
-    
+
+        cmd, args = parsed
+        if cmd in self.commands:
+            result = self.commands[cmd](args)
+            if asyncio.iscoroutine(result):
+                return await result
+            return result
+        else:
+            return f"未知命令：{cmd}。输入 /help 查看帮助。"
+
     def handle(self, user_input: str) -> Optional[str]:
-        """同步处理用户输入（向后兼容）"""
-        user_input = user_input.strip()
-        
-        if not user_input:
+        parsed = self._parse_command_input(user_input)
+        if parsed is None:
             return None
-        
-        if user_input.startswith('/'):
-            cmd_parts = user_input[1:].split(maxsplit=1)
-            cmd = cmd_parts[0].lower()
-            args = cmd_parts[1] if len(cmd_parts) > 1 else ""
-            
-            if cmd in self.commands:
-                result = self.commands[cmd](args)
-                if asyncio.iscoroutine(result):
-                    return "此命令需要异步执行，请使用 handle_async"
-                return result
-            else:
-                return f"未知命令：{cmd}。输入 /help 查看帮助。"
-        
-        return None
+
+        cmd, args = parsed
+        if cmd in self.commands:
+            result = self.commands[cmd](args)
+            if asyncio.iscoroutine(result):
+                return "此命令需要异步执行，请使用 handle_async"
+            return result
+        else:
+            return f"未知命令：{cmd}。输入 /help 查看帮助。"
     
     def _cmd_help(self, args: str) -> str:
         """显示帮助信息"""
@@ -156,16 +160,15 @@ Skill管理：
         return "\n".join(lines)
     
     def _cmd_history(self, args: str) -> str:
-        """显示对话历史"""
         messages = self.agent._query_engine.get_messages()
-        
+
         if not messages:
             return "对话历史为空"
-        
+
         lines = ["对话历史："]
         for i, msg in enumerate(messages, 1):
             msg_type = type(msg).__name__
-            content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
+            content = self._truncate(msg.content, 100)
             lines.append(f"  [{i}] {msg_type}: {content}")
         
         return "\n".join(lines)
@@ -176,10 +179,7 @@ Skill管理：
         return "对话历史已清空"
     
     def _cmd_skill(self, args: str) -> str:
-        """Skill相关命令"""
-        parts = args.split(maxsplit=1)
-        sub_cmd = parts[0].lower() if parts else ""
-        skill_name = parts[1] if len(parts) > 1 else ""
+        sub_cmd, skill_name = self._parse_sub_cmd(args)
         
         if sub_cmd == "list":
             skills = self.skill_loader.list_skills()
@@ -210,79 +210,65 @@ Skill管理：
         else:
             return "用法：/skill list | /skill show <name>"
     
+    def _format_tool_list(self, tools, desc_max_len: int = 50) -> str:
+        if not tools:
+            return "没有可用的工具"
+
+        lines = ["可用工具："]
+        for tool in tools:
+            desc = self._truncate(tool.description, desc_max_len)
+            lines.append(f"  - {tool.name}: {desc}")
+        return "\n".join(lines)
+
     def _cmd_tool(self, args: str) -> str:
-        """工具相关命令"""
-        parts = args.split(maxsplit=1)
-        sub_cmd = parts[0].lower() if parts else ""
-        
+        sub_cmd, _ = self._parse_sub_cmd(args)
+
         if sub_cmd == "list":
-            tools = self.agent.tools
-            if not tools:
-                return "没有可用的工具"
-            
-            lines = ["可用工具："]
-            for tool in tools:
-                lines.append(f"  - {tool.name}: {tool.description[:50]}...")
-            return "\n".join(lines)
-        
+            return self._format_tool_list(self.agent.tools, desc_max_len=50)
         else:
             return "用法：/tool list"
     
     def _cmd_prompt(self, args: str) -> str:
-        """提示词相关命令"""
-        parts = args.split(maxsplit=1)
-        sub_cmd = parts[0].lower() if parts else ""
-        
+        sub_cmd, _ = self._parse_sub_cmd(args)
+
         if sub_cmd == "show":
             prompt = self.agent.get_system_prompt()
             lines = ["系统提示词：", "-" * 40]
-            lines.append(prompt[:500] + "..." if len(prompt) > 500 else prompt)
+            lines.append(self._truncate(prompt, 500))
             return "\n".join(lines)
-        
         else:
             return "用法：/prompt show"
     
     async def _cmd_browser(self, args: str) -> str:
-        """浏览器相关命令"""
-        parts = args.split(maxsplit=1)
-        sub_cmd = parts[0].lower() if parts else ""
-        
+        sub_cmd, _ = self._parse_sub_cmd(args)
+
         if not self.mcp_manager:
             return "MCP未启用，无法管理浏览器"
-        
+
+        if not self.mcp_manager.is_connected:
+            return "MCP未连接"
+
         if sub_cmd == "status":
-            if not self.mcp_manager.is_connected:
-                return "MCP未连接"
-            
             alive = await self.mcp_manager.check_browser_alive()
             status = "运行中" if alive else "已关闭"
             return f"浏览器状态: {status}"
-        
+
         elif sub_cmd == "close":
-            if not self.mcp_manager.is_connected:
-                return "MCP未连接"
-            
             success = await self.mcp_manager.close_browser()
             return "浏览器已关闭" if success else "关闭浏览器失败"
-        
+
         elif sub_cmd == "reopen":
-            if not self.mcp_manager.is_connected:
-                return "MCP未连接"
-            
             success = await self.mcp_manager.ensure_browser()
             return "浏览器已重新打开" if success else "重新打开浏览器失败"
-        
+
         else:
             return "用法：/browser status | /browser close | /browser reopen"
     
     async def _cmd_role(self, args: str) -> str:
-        """角色相关命令"""
         if not self.role_manager:
             return "角色管理未启用，请检查 RoleManager 配置"
-        
-        parts = args.split(maxsplit=1)
-        sub_cmd = parts[0].lower() if parts else ""
-        role_name = parts[1] if len(parts) > 1 else ""
+
+        sub_cmd, role_name = self._parse_sub_cmd(args)
         
         if sub_cmd == "list":
             return await self._role_list()
@@ -347,20 +333,45 @@ Skill管理：
         
         return "\n".join(lines)
     
+    def _update_model_for_role(self, name: str) -> None:
+        merged_model = self.role_manager.get_merged_model_config(name)
+        if merged_model:
+            self.agent.llm = self.agent._create_llm(merged_model)
+            self.agent.logger.log_agent_action("model_config_updated", {
+                "role_name": name,
+                "model_name": merged_model.name,
+                "provider": merged_model.provider,
+                "temperature": merged_model.temperature,
+                "max_tokens": merged_model.max_tokens
+            })
+
+    def _format_skills_info(self, role_skills) -> str:
+        if not role_skills:
+            return ""
+
+        skill_details = []
+        for skill_name in role_skills:
+            metadata = self.skill_loader.registry.get_skill(skill_name)
+            if metadata:
+                skill_details.append(f"{metadata.name}: {metadata.description}")
+            else:
+                skill_details.append(f"{skill_name}: Skill元数据未找到")
+        return f"\nSkills: {', '.join(skill_details)}"
+
     async def _role_switch(self, name: str) -> str:
-        """切换到指定角色"""
         try:
             if not self.role_manager.has_role(name):
                 return f"角色 '{name}' 不存在。使用 /role list 查看可用角色。"
-            
+
             role = self.role_manager.switch_role(name)
-            
+
             self.agent.clear_context()
-            
+
             role_skills = None
             if role.tools and role.tools.skills:
                 role_skills = role.tools.skills
-            
+
+            new_tool_registry = None
             if self.agent_pool:
                 new_tool_registry = self.agent_pool._create_tool_registry(
                     mcp_manager=getattr(self.agent, '_mcp_manager', None),
@@ -368,44 +379,23 @@ Skill管理：
                 )
                 self.agent.role_config = role
                 self.agent.reload_tools(new_tool_registry)
-            
+
             await self.agent.load_role_skills(role_skills)
-            
-            self.agent.reload_system_prompt(role)
-            
-            merged_model = self.role_manager.get_merged_model_config(name)
-            if merged_model:
-                self.agent.llm = self.agent._create_llm(merged_model)
-                self.agent.logger.log_agent_action("model_config_updated", {
-                    "role_name": name,
-                    "model_name": merged_model.name,
-                    "provider": merged_model.provider,
-                    "temperature": merged_model.temperature,
-                    "max_tokens": merged_model.max_tokens
-                })
-            
-            tools_info = self._get_tools_summary(new_tool_registry) if self.agent_pool else ""
-            
-            skills_info = ""
-            if role_skills:
-                skill_details = []
-                for skill_name in role_skills:
-                    metadata = self.skill_loader.registry.get_skill(skill_name)
-                    if metadata:
-                        skill_details.append(f"{metadata.name}: {metadata.description}")
-                    else:
-                        skill_details.append(f"{skill_name}: Skill元数据未找到")
-                skills_info = f"\nSkills: {', '.join(skill_details)}"
-            
+
+            self._update_model_for_role(name)
+
+            tools_info = self._get_tools_summary(new_tool_registry, self.agent.tools) if new_tool_registry else ""
+            skills_info = self._format_skills_info(role_skills)
+
             return f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。\n{tools_info}{skills_info}"
-            
+
         except ConfigValidationError as e:
             return f"切换角色失败：{str(e)}"
         except Exception as e:
             return f"切换角色时发生错误：{str(e)}"
     
-    def _get_tools_summary(self, tool_registry) -> str:
-        tools = tool_registry.get_all_tools()
+    def _get_tools_summary(self, tool_registry, agent_tools=None) -> str:
+        tools = agent_tools if agent_tools is not None else tool_registry.get_all_tools()
         if not tools:
             return "工具: 无"
         
@@ -478,9 +468,7 @@ Skill管理：
             return f"重新加载配置时发生错误：{str(e)}"
     
     def _cmd_status(self, args: str) -> str:
-        """状态查看命令"""
-        parts = args.split(maxsplit=1)
-        sub_cmd = parts[0].lower() if parts else ""
+        sub_cmd, _ = self._parse_sub_cmd(args)
         
         if sub_cmd == "full":
             return self._status_full()
@@ -526,14 +514,13 @@ Skill管理：
         return "\n".join(lines)
     
     def _status_tools(self) -> str:
-        """显示工具详情"""
         tools = self.agent.tools
         if not tools:
             return "没有可用的工具"
-        
+
         lines = ["可用工具列表："]
         for i, tool in enumerate(tools, 1):
-            desc = tool.description[:100] + "..." if len(tool.description) > 100 else tool.description
+            desc = self._truncate(tool.description, 100)
             lines.append(f"  {i}. {tool.name}")
             lines.append(f"     描述: {desc}")
         return "\n".join(lines)

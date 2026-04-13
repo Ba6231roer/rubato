@@ -125,6 +125,10 @@ class SubAgentModelConfig(BaseModel):
         default=None,
         description="API 基础 URL"
     )
+    auth: Optional[str] = Field(
+        default=None,
+        description="授权头（用于企业内网大模型服务）"
+    )
 
 
 class SubAgentDefinition(BaseModel):

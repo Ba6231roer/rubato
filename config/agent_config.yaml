@@ -18,7 +18,7 @@ agent:
   execution:
     recursion_limit: 100
     sub_agent_recursion_limit: 50
-    default_timeout: 300
+    llm_timeout: 300
   
   logging:
     log_token_estimation: true

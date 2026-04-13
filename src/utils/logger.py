@@ -1,6 +1,5 @@
 import logging
 import json
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, List, Dict
 import sys
@@ -62,6 +61,8 @@ class LLMRequestCallbackHandler(BaseCallbackHandler):
 class LLMLogger:
     """LLM请求/响应日志记录器"""
     
+    _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(message)s"
+    
     def __init__(self, log_dir: str = "logs", tool_log_mode: str = "summary", log_format: str = "compact"):
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -72,23 +73,9 @@ class LLMLogger:
     
     def _setup_loggers(self):
         """设置多个日志记录器"""
-        self.llm_logger = self._create_logger(
-            "llm",
-            self.log_dir / "llm.log",
-            "%(asctime)s | %(levelname)s | %(message)s"
-        )
-        
-        self.tool_logger = self._create_logger(
-            "tool",
-            self.log_dir / "tool.log",
-            "%(asctime)s | %(levelname)s | %(message)s"
-        )
-        
-        self.agent_logger = self._create_logger(
-            "agent",
-            self.log_dir / "agent.log",
-            "%(asctime)s | %(levelname)s | %(message)s"
-        )
+        self.llm_logger = self._create_logger("llm", self.log_dir / "llm.log")
+        self.tool_logger = self._create_logger("tool", self.log_dir / "tool.log")
+        self.agent_logger = self._create_logger("agent", self.log_dir / "agent.log")
     
     def set_tool_log_mode(self, mode: str) -> None:
         """设置工具日志模式
@@ -136,6 +123,33 @@ class LLMLogger:
             return f"[role: {role}, parent: {parent}]"
         return f"[role: {role}]"
     
+    def _get_role_str(self) -> str:
+        """获取格式化的角色字符串，用于日志前缀"""
+        role_prefix = self.get_role_prefix()
+        return f" {role_prefix}" if role_prefix else ""
+    
+    @staticmethod
+    def _extract_tool_name(tool) -> str:
+        """从各种工具表示中提取工具名称
+        
+        支持的格式：
+        - dict with 'function' key (OpenAI format): {"function": {"name": "..."}}
+        - dict with 'name' key: {"name": "..."}
+        - object with 'name' attribute
+        - 其他类型转为字符串
+        """
+        if isinstance(tool, dict):
+            if 'function' in tool and isinstance(tool.get('function'), dict):
+                return tool.get('function', {}).get('name', 'unknown')
+            elif 'name' in tool:
+                return tool.get('name', 'unknown')
+            else:
+                return 'unknown'
+        elif hasattr(tool, 'name'):
+            return tool.name
+        else:
+            return str(tool)
+    
     def _format_compact(self, data: dict, indent: int = 0) -> str:
         """格式化字典为紧凑键值对
         
@@ -166,10 +180,7 @@ class LLMLogger:
     
     def _is_simple_dict(self, d: dict) -> bool:
         """检查字典是否简单（所有值都是基本类型）"""
-        for v in d.values():
-            if isinstance(v, (dict, list)):
-                return False
-        return True
+        return all(not isinstance(v, (dict, list)) for v in d.values())
     
     def _format_simple_dict(self, d: dict) -> str:
         """格式化简单字典为单行"""
@@ -252,17 +263,7 @@ class LLMLogger:
                         'file_replace', 'file_delete'}
         
         for tool in tools:
-            if isinstance(tool, dict):
-                if 'function' in tool and isinstance(tool.get('function'), dict):
-                    tool_name = tool.get('function', {}).get('name', 'unknown')
-                elif 'name' in tool:
-                    tool_name = tool.get('name', 'unknown')
-                else:
-                    tool_name = 'unknown'
-            elif hasattr(tool, 'name'):
-                tool_name = tool.name
-            else:
-                tool_name = str(tool)
+            tool_name = self._extract_tool_name(tool)
             
             if tool_name in builtin_names:
                 builtin_tools.append(tool_name)
@@ -281,7 +282,7 @@ class LLMLogger:
         
         return "\n".join(lines)
     
-    def _create_logger(self, name: str, file_path: Path, format_str: str) -> logging.Logger:
+    def _create_logger(self, name: str, file_path: Path) -> logging.Logger:
         """创建日志记录器"""
         logger = logging.getLogger(name)
         logger.setLevel(logging.DEBUG)
@@ -289,20 +290,19 @@ class LLMLogger:
         
         file_handler = logging.FileHandler(file_path, encoding="utf-8")
         file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter(format_str))
+        file_handler.setFormatter(logging.Formatter(self._LOG_FORMAT))
         logger.addHandler(file_handler)
         
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(logging.Formatter(format_str))
+        console_handler.setFormatter(logging.Formatter(self._LOG_FORMAT))
         logger.addHandler(console_handler)
         
         return logger
     
     def log_request(self, messages: list, model: str, **kwargs):
         """记录LLM请求"""
-        role_prefix = self.get_role_prefix()
-        role_str = f" {role_prefix}" if role_prefix else ""
+        role_str = self._get_role_str()
         
         if self.log_format == "compact":
             request_data = {
@@ -335,8 +335,7 @@ class LLMLogger:
     
     def log_request_raw(self, request_body: dict, model: str):
         """记录LLM原始请求报文"""
-        role_prefix = self.get_role_prefix()
-        role_str = f" {role_prefix}" if role_prefix else ""
+        role_str = self._get_role_str()
         
         if self.log_format == "compact":
             compact_data = {
@@ -352,13 +351,7 @@ class LLMLogger:
                 if self.tool_log_mode == "summary":
                     compact_data["tools_summary"] = self._format_tools_summary(request_body["tools"])
                 else:
-                    tool_names = []
-                    for tool in request_body["tools"]:
-                        if isinstance(tool, dict) and "function" in tool:
-                            tool_names.append(tool["function"].get("name", "unknown"))
-                        elif hasattr(tool, 'name'):
-                            tool_names.append(tool.name)
-                    compact_data["tools"] = tool_names
+                    compact_data["tools"] = [self._extract_tool_name(t) for t in request_body["tools"]]
             
             if "messages" in request_body:
                 messages = request_body["messages"]
@@ -380,8 +373,7 @@ class LLMLogger:
     
     def log_response(self, response: Any, model: str):
         """记录LLM响应"""
-        role_prefix = self.get_role_prefix()
-        role_str = f" {role_prefix}" if role_prefix else ""
+        role_str = self._get_role_str()
         
         if self.log_format == "compact":
             response_data = {
@@ -411,8 +403,7 @@ class LLMLogger:
     
     def log_tool_call(self, tool_name: str, arguments: dict):
         """记录工具调用"""
-        role_prefix = self.get_role_prefix()
-        role_str = f" {role_prefix}" if role_prefix else ""
+        role_str = self._get_role_str()
         
         if self.log_format == "compact":
             call_data = {
@@ -436,8 +427,7 @@ class LLMLogger:
     
     def log_tool_result(self, tool_name: str, result: Any, error: Optional[str] = None):
         """记录工具结果"""
-        role_prefix = self.get_role_prefix()
-        role_str = f" {role_prefix}" if role_prefix else ""
+        role_str = self._get_role_str()
         
         if self.log_format == "compact":
             result_data = {
@@ -464,14 +454,12 @@ class LLMLogger:
     
     def log_agent_thinking(self, thought: str):
         """记录Agent思考过程"""
-        role_prefix = self.get_role_prefix()
-        role_str = f" {role_prefix}" if role_prefix else ""
+        role_str = self._get_role_str()
         self.agent_logger.info(f"THINKING{role_str}: {thought}")
     
     def log_agent_action(self, action: str, details: dict = None):
         """记录Agent行动"""
-        role_prefix = self.get_role_prefix()
-        role_str = f" {role_prefix}" if role_prefix else ""
+        role_str = self._get_role_str()
         
         if self.log_format == "compact":
             action_data = {"action": action}
@@ -490,8 +478,7 @@ class LLMLogger:
     
     def log_error(self, source: str, error: Exception):
         """记录错误"""
-        role_prefix = self.get_role_prefix()
-        role_str = f" {role_prefix}" if role_prefix else ""
+        role_str = self._get_role_str()
         
         if self.log_format == "compact":
             error_data = {

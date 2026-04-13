@@ -5,7 +5,6 @@ from .models import (
     RoleModelConfig,
     RoleExecutionConfig,
     ModelConfig,
-    FallbackModelConfig,
     ModelParameters,
     FullModelConfig,
     MCPConnectionConfig,
@@ -34,6 +33,7 @@ from .validators import (
     validate_api_key,
     validate_config_value,
     handle_pydantic_error,
+    replace_env_vars,
 )
 
 __all__ = [
@@ -41,7 +41,6 @@ __all__ = [
     "RoleModelConfig",
     "RoleExecutionConfig",
     "ModelConfig",
-    "FallbackModelConfig",
     "ModelParameters",
     "FullModelConfig",
     "MCPConnectionConfig",
@@ -68,4 +67,5 @@ __all__ = [
     "validate_api_key",
     "validate_config_value",
     "handle_pydantic_error",
+    "replace_env_vars",
 ]

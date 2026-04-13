@@ -1,17 +1,22 @@
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import BaseMessage, AIMessage, AIMessageChunk, SystemMessage
-from langchain_core.outputs import ChatResult, ChatGeneration
+from langchain_core.messages import (
+    BaseMessage, AIMessage, AIMessageChunk, SystemMessage,
+    HumanMessage, ToolMessage
+)
 from langchain_core.tools import BaseTool
 from typing import List, Optional, Any, Dict, AsyncGenerator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+import json
+import os
 import time
 import asyncio
 import tiktoken
+from datetime import datetime
+from openai import AsyncOpenAI
+import openai
 
 
 @dataclass
 class UsageStats:
-    """使用量统计"""
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -38,207 +43,68 @@ class UsageStats:
         self.call_count = 0
 
 
-class RobustChatOpenAI(ChatOpenAI):
-    def _generate(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[Any] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                result = super()._generate(messages, stop, run_manager, **kwargs)
-                
-                if result.generations and len(result.generations) > 0:
-                    return result
-                else:
-                    if attempt < max_retries - 1:
-                        time.sleep(retry_delay)
-                        continue
-                    else:
-                        return ChatResult(
-                            generations=[ChatGeneration(
-                                message=BaseMessage(content="API返回空响应，请重试", type="ai")
-                            )]
-                        )
-                        
-            except TypeError as e:
-                if "null value for 'choices'" in str(e):
-                    if attempt < max_retries - 1:
-                        time.sleep(retry_delay)
-                        continue
-                    else:
-                        return ChatResult(
-                            generations=[ChatGeneration(
-                                message=BaseMessage(
-                                    content="API响应格式异常(choices为null)，已达到最大重试次数",
-                                    type="ai"
-                                )
-                            )]
-                        )
-                else:
-                    raise
-            except Exception as e:
-                raise
-        
-        return ChatResult(
-            generations=[ChatGeneration(
-                message=BaseMessage(content="生成失败，请重试", type="ai")
-            )]
-        )
-
-    async def _agenerate(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[Any] = None,
-        **kwargs: Any,
-    ) -> ChatResult:
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                result = await super()._agenerate(messages, stop, run_manager, **kwargs)
-                
-                if result.generations and len(result.generations) > 0:
-                    return result
-                else:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    else:
-                        return ChatResult(
-                            generations=[ChatGeneration(
-                                message=BaseMessage(content="API返回空响应，请重试", type="ai")
-                            )]
-                        )
-                        
-            except TypeError as e:
-                if "null value for 'choices'" in str(e):
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    else:
-                        return ChatResult(
-                            generations=[ChatGeneration(
-                                message=BaseMessage(
-                                    content="API响应格式异常(choices为null)，已达到最大重试次数",
-                                    type="ai"
-                                )
-                            )]
-                        )
-                else:
-                    raise
-            except Exception as e:
-                raise
-        
-        return ChatResult(
-            generations=[ChatGeneration(
-                message=BaseMessage(content="生成失败，请重试", type="ai")
-            )]
-        )
-
-    async def _astream(
-        self,
-        messages: List[BaseMessage],
-        stop: Optional[List[str]] = None,
-        run_manager: Optional[Any] = None,
-        **kwargs: Any,
-    ) -> Any:
-        max_retries = 3
-        retry_delay = 1
-        
-        for attempt in range(max_retries):
-            try:
-                has_content = False
-                async for chunk in super()._astream(messages, stop, run_manager, **kwargs):
-                    has_content = True
-                    yield chunk
-                
-                if has_content:
-                    return
-                else:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    else:
-                        yield BaseMessage(content="API返回空响应，请重试", type="ai")
-                        return
-                        
-            except TypeError as e:
-                if "null value for 'choices'" in str(e):
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay)
-                        continue
-                    else:
-                        yield BaseMessage(
-                            content="API响应格式异常(choices为null)，已达到最大重试次数",
-                            type="ai"
-                        )
-                        return
-                else:
-                    raise
-            except Exception as e:
-                raise
-        
-        yield BaseMessage(content="生成失败，请重试", type="ai")
-
-
 class LLMCaller:
     """LLM 调用封装器
     
-    封装 LangChain 的 LLM 调用，提供统一的接口。
-    复用现有的 RobustChatOpenAI 实现。
+    直接使用 openai.AsyncOpenAI SDK 进行 LLM 调用，
+    不依赖 LangChain 的 ChatOpenAI，避免类型契约问题。
+    输入输出仍使用 LangChain 消息类型以保持兼容性。
     """
     
     def __init__(
         self,
-        llm,
+        api_key: str,
+        model: str = "gpt-4",
+        base_url: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: int = 80000,
+        default_headers: Optional[Dict[str, str]] = None,
         tools: Optional[List[BaseTool]] = None,
         system_prompt: Optional[str] = None,
         logger: Optional[Any] = None,
         timeout: float = 300.0,
-        max_context_tokens: Optional[int] = None
+        max_context_tokens: Optional[int] = None,
+        retry_max_count: int = 3,
+        retry_initial_delay: float = 10.0,
+        retry_max_delay: float = 60.0
     ):
-        self.llm = llm
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
         self.tools = tools or []
         self.system_prompt = system_prompt
         self.usage_stats = UsageStats()
-        self._bound_llm = None
+        self._tool_schemas: Optional[List[Dict[str, Any]]] = None
         self.logger = logger
         self.timeout = timeout
         self.max_context_tokens = max_context_tokens
+        self.retry_max_count = retry_max_count
+        self.retry_initial_delay = retry_initial_delay
+        self.retry_max_delay = retry_max_delay
+        
+        client_kwargs = {"api_key": api_key}
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        if default_headers:
+            client_kwargs["default_headers"] = default_headers
+        
+        self.client = AsyncOpenAI(**client_kwargs)
     
     def bind_tools(self, tools: Optional[List[BaseTool]] = None) -> 'LLMCaller':
-        """绑定工具到 LLM
-        
-        Args:
-            tools: 要绑定的工具列表，如果为 None 则使用初始化时的工具
-            
-        Returns:
-            LLMCaller: 返回自身以支持链式调用
-        """
         tools_to_bind = tools if tools is not None else self.tools
         
         if tools_to_bind:
-            tool_schemas = self._get_tool_schemas(tools_to_bind)
+            self._tool_schemas = self._get_tool_schemas(tools_to_bind)
             
             if self.logger:
-                tool_names = [s.get('function', {}).get('name', 'unknown') for s in tool_schemas]
+                tool_names = [s.get('function', {}).get('name', 'unknown') for s in self._tool_schemas]
                 self.logger.log_agent_action("bind_tools", {
-                    "tool_count": len(tool_schemas),
+                    "tool_count": len(self._tool_schemas),
                     "tool_names": tool_names,
-                    "sample_schema": tool_schemas[0] if tool_schemas else None
+                    "sample_schema": self._tool_schemas[0] if self._tool_schemas else None
                 })
-            
-            self._bound_llm = self.llm.bind_tools(tool_schemas)
         else:
-            self._bound_llm = None
+            self._tool_schemas = None
         
         return self
     
@@ -247,77 +113,91 @@ class LLMCaller:
         messages: List[BaseMessage],
         use_tools: bool = True
     ) -> AIMessage:
-        """非流式调用 LLM
-        
-        Args:
-            messages: 消息列表
-            use_tools: 是否使用工具
-            
-        Returns:
-            AIMessage: AI 响应消息
-        """
         full_messages = self._prepare_messages(messages)
+        openai_messages = self._convert_messages_to_openai(full_messages)
         
-        llm_to_use = self._get_llm_with_tools(use_tools)
-        response = await llm_to_use.ainvoke(full_messages)
+        request_params = self._build_request_params(openai_messages, use_tools)
         
-        self._update_usage(response)
+        if self.logger:
+            self.logger.log_request(full_messages, self.model)
         
-        return response
+        try:
+            response = await asyncio.wait_for(
+                self.client.chat.completions.create(**request_params),
+                timeout=self.timeout
+            )
+            
+            aimessage = self._convert_openai_response_to_aimessage(response)
+            self._update_usage(aimessage)
+            
+            if self.logger:
+                self.logger.log_response(aimessage, self.model)
+            
+            return aimessage
+            
+        except Exception as e:
+            self._dump_error_request_data(request_params, e)
+            raise
     
     async def stream(
         self,
         messages: List[BaseMessage],
         use_tools: bool = True
     ) -> AsyncGenerator[AIMessageChunk, None]:
-        """流式调用 LLM
-        
-        Args:
-            messages: 消息列表
-            use_tools: 是否使用工具
-            
-        Yields:
-            AIMessageChunk: 流式响应块
-        """
         full_messages = self._prepare_messages(messages)
-        llm_to_use = self._get_llm_with_tools(use_tools)
+        openai_messages = self._convert_messages_to_openai(full_messages)
+        request_params = self._build_request_params(openai_messages, use_tools, stream=True)
         
         accumulated_content = ""
-        accumulated_tool_calls = []
-        current_tool_call = None
+        accumulated_tool_calls: Dict[int, Dict] = {}
         
-        async for chunk in llm_to_use.astream(full_messages):
-            if isinstance(chunk, AIMessageChunk):
-                if chunk.content:
-                    accumulated_content += chunk.content
-                    yield chunk
+        try:
+            stream = await self.client.chat.completions.create(**request_params)
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
                 
-                if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
-                    for tool_chunk in chunk.tool_call_chunks:
-                        if isinstance(tool_chunk, dict):
-                            if tool_chunk.get("type") == "tool_call_start":
-                                current_tool_call = {
-                                    "id": tool_chunk.get("id"),
-                                    "name": tool_chunk.get("name"),
-                                    "args": {}
-                                }
-                                accumulated_tool_calls.append(current_tool_call)
-                            elif tool_chunk.get("type") == "tool_call_arg":
-                                if current_tool_call:
-                                    arg_key = tool_chunk.get("arg_name")
-                                    arg_value = tool_chunk.get("arg_value")
-                                    if arg_key and arg_value:
-                                        current_tool_call["args"][arg_key] = arg_value
+                delta = chunk.choices[0].delta
+                
+                if delta.content:
+                    accumulated_content += delta.content
+                    yield AIMessageChunk(content=delta.content)
+                
+                if delta.tool_calls:
+                    for tc_chunk in delta.tool_calls:
+                        idx = tc_chunk.index
+                        if idx not in accumulated_tool_calls:
+                            accumulated_tool_calls[idx] = {
+                                "id": tc_chunk.id or "",
+                                "name": "",
+                                "args": ""
+                            }
+                        if tc_chunk.id:
+                            accumulated_tool_calls[idx]["id"] = tc_chunk.id
+                        if tc_chunk.function and tc_chunk.function.name:
+                            accumulated_tool_calls[idx]["name"] = tc_chunk.function.name
+                        if tc_chunk.function and tc_chunk.function.arguments:
+                            accumulated_tool_calls[idx]["args"] += tc_chunk.function.arguments
+        except Exception as e:
+            self._dump_error_request_data(request_params, e)
+            raise
         
-        final_message = AIMessage(
-            content=accumulated_content
-        )
+        tool_calls = []
+        for idx in sorted(accumulated_tool_calls.keys()):
+            tc_data = accumulated_tool_calls[idx]
+            try:
+                args = json.loads(tc_data["args"]) if tc_data["args"] else {}
+            except json.JSONDecodeError:
+                args = {}
+            tool_calls.append({
+                "id": tc_data["id"],
+                "name": tc_data["name"],
+                "args": args
+            })
         
-        if accumulated_tool_calls:
-            final_message = AIMessage(
-                content=accumulated_content,
-                tool_calls=accumulated_tool_calls
-            )
+        final_message = AIMessage(content=accumulated_content)
+        if tool_calls:
+            final_message = AIMessage(content=accumulated_content, tool_calls=tool_calls)
         
         self._update_usage(final_message)
     
@@ -326,157 +206,357 @@ class LLMCaller:
         messages: List[BaseMessage],
         use_tools: bool = True
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        """流式调用 LLM 并返回结构化数据
-        
-        Args:
-            messages: 消息列表
-            use_tools: 是否使用工具
-            
-        Yields:
-            Dict[str, Any]: 流式响应块，包含 type 和相关数据
-        """
-        import json
         from langchain_core.messages import ToolCall
         
         full_messages = self._prepare_messages(messages)
-        llm_to_use = self._get_llm_with_tools(use_tools)
+        openai_messages = self._convert_messages_to_openai(full_messages)
         
         if self.logger:
-            self.logger.log_request(full_messages, self.llm.model_name if hasattr(self.llm, 'model_name') else 'unknown')
+            self.logger.log_request(full_messages, self.model)
         
         accumulated_content = ""
         accumulated_tool_call_chunks: Dict[int, Dict] = {}
         has_content = False
         
-        try:
-            async with asyncio.timeout(self.timeout):
-                async for chunk in llm_to_use.astream(full_messages):
-                    has_content = True
-                    if isinstance(chunk, AIMessageChunk):
-                        if chunk.content:
-                            accumulated_content += chunk.content
-                            yield {
-                                "type": "text_delta",
-                                "text": chunk.content
-                            }
-                        
-                        if hasattr(chunk, 'tool_call_chunks') and chunk.tool_call_chunks:
-                            for tool_chunk in chunk.tool_call_chunks:
-                                if isinstance(tool_chunk, dict):
-                                    index = tool_chunk.get("index", 0)
-                                    
-                                    if index not in accumulated_tool_call_chunks:
-                                        accumulated_tool_call_chunks[index] = {
-                                            "id": tool_chunk.get("id", ""),
-                                            "name": tool_chunk.get("name", ""),
-                                            "args": ""
-                                        }
-                                    
-                                    if tool_chunk.get("id"):
-                                        accumulated_tool_call_chunks[index]["id"] = tool_chunk["id"]
-                                    if tool_chunk.get("name"):
-                                        accumulated_tool_call_chunks[index]["name"] = tool_chunk["name"]
-                                    if tool_chunk.get("args"):
-                                        accumulated_tool_call_chunks[index]["args"] += tool_chunk["args"]
+        delay = self.retry_initial_delay
+        for retry_attempt in range(self.retry_max_count + 1):
+            request_params = self._build_request_params(openai_messages, use_tools, stream=True)
             
-            if not has_content:
+            try:
+                stream = await asyncio.wait_for(
+                    self.client.chat.completions.create(**request_params),
+                    timeout=self.timeout
+                )
+                
+                async for chunk in stream:
+                    if not chunk.choices:
+                        continue
+                    
+                    delta = chunk.choices[0].delta
+                    has_content = True
+                    
+                    if delta.content:
+                        accumulated_content += delta.content
+                        yield {
+                            "type": "text_delta",
+                            "text": delta.content
+                        }
+                    
+                    if delta.tool_calls:
+                        for tc_chunk in delta.tool_calls:
+                            index = tc_chunk.index
+                            
+                            if index not in accumulated_tool_call_chunks:
+                                accumulated_tool_call_chunks[index] = {
+                                    "id": tc_chunk.id or "",
+                                    "name": "",
+                                    "args": ""
+                                }
+                            
+                            if tc_chunk.id:
+                                accumulated_tool_call_chunks[index]["id"] = tc_chunk.id
+                            if tc_chunk.function and tc_chunk.function.name:
+                                accumulated_tool_call_chunks[index]["name"] = tc_chunk.function.name
+                            if tc_chunk.function and tc_chunk.function.arguments:
+                                accumulated_tool_call_chunks[index]["args"] += tc_chunk.function.arguments
+                
+                if not has_content:
+                    if retry_attempt < self.retry_max_count:
+                        if self.logger:
+                            self.logger.log_error("stream_call_retry", Exception(
+                                f"LLM 返回空响应，第{retry_attempt + 1}次重试，等待{delay}秒"
+                            ))
+                        yield {
+                            "type": "retry",
+                            "attempt": retry_attempt + 1,
+                            "delay": delay,
+                            "message": f"LLM 返回空响应，{delay}秒后重试"
+                        }
+                        await asyncio.sleep(delay)
+                        delay = min(delay * 2, self.retry_max_delay)
+                        accumulated_content = ""
+                        accumulated_tool_call_chunks = {}
+                        has_content = False
+                        continue
+                    else:
+                        if self.logger:
+                            self.logger.log_error("stream_call", Exception("LLM returned empty response"))
+                        yield {
+                            "type": "error",
+                            "message": f"LLM 返回空响应，已重试{self.retry_max_count}次"
+                        }
+                        return
+                
+                tool_calls = []
+                for index in sorted(accumulated_tool_call_chunks.keys()):
+                    chunk_data = accumulated_tool_call_chunks[index]
+                    args_str = chunk_data.get("args", "{}")
+                    try:
+                        args = json.loads(args_str) if args_str else {}
+                    except json.JSONDecodeError:
+                        args = {}
+                    
+                    tool_call = ToolCall(
+                        id=chunk_data.get("id", f"tool_{index}"),
+                        name=chunk_data.get("name", ""),
+                        args=args
+                    )
+                    tool_calls.append(tool_call)
+                    
+                    yield {
+                        "type": "tool_call_start",
+                        "tool": {
+                            "id": tool_call["id"],
+                            "name": tool_call["name"],
+                            "args": tool_call["args"]
+                        }
+                    }
+                
+                final_message = AIMessage(
+                    content=accumulated_content,
+                    tool_calls=tool_calls
+                )
+                
+                self._update_usage(final_message)
+                
                 if self.logger:
-                    self.logger.log_error("stream_call", Exception("LLM returned empty response"))
+                    self.logger.log_response(final_message, self.model)
+                
+                usage_data = {}
+                if hasattr(final_message, 'usage_metadata') and final_message.usage_metadata:
+                    usage_data = {
+                        "input_tokens": final_message.usage_metadata.get("input_tokens", 0),
+                        "output_tokens": final_message.usage_metadata.get("output_tokens", 0),
+                        "total_tokens": final_message.usage_metadata.get("total_tokens", 0),
+                    }
+                
                 yield {
-                    "type": "error",
-                    "message": "LLM 返回空响应"
+                    "type": "complete",
+                    "response": final_message,
+                    "usage": usage_data,
                 }
                 return
-            
-            tool_calls = []
-            for index in sorted(accumulated_tool_call_chunks.keys()):
-                chunk_data = accumulated_tool_call_chunks[index]
-                args_str = chunk_data.get("args", "{}")
-                try:
-                    args = json.loads(args_str) if args_str else {}
-                except json.JSONDecodeError:
-                    args = {}
                 
-                tool_call = ToolCall(
-                    id=chunk_data.get("id", f"tool_{index}"),
-                    name=chunk_data.get("name", ""),
-                    args=args
-                )
-                tool_calls.append(tool_call)
-                
-                yield {
-                    "type": "tool_call_start",
-                    "tool": {
-                        "id": tool_call["id"],
-                        "name": tool_call["name"],
-                        "args": tool_call["args"]
+            except asyncio.TimeoutError:
+                self._dump_error_request_data(request_params, asyncio.TimeoutError(f"LLM 调用超时（{self.timeout}秒）"))
+                if retry_attempt < self.retry_max_count:
+                    if self.logger:
+                        self.logger.log_error("stream_call_retry", Exception(
+                            f"LLM 调用超时（{self.timeout}秒），第{retry_attempt + 1}次重试，等待{delay}秒"
+                        ))
+                    yield {
+                        "type": "retry",
+                        "attempt": retry_attempt + 1,
+                        "delay": delay,
+                        "message": f"LLM 调用超时（{self.timeout}秒），{delay}秒后重试"
                     }
-                }
-            
-            final_message = AIMessage(
-                content=accumulated_content,
-                tool_calls=tool_calls
-            )
-            
-            self._update_usage(final_message)
-            
-            if self.logger:
-                self.logger.log_response(final_message, self.llm.model_name if hasattr(self.llm, 'model_name') else 'unknown')
-            
-            usage_data = {}
-            if hasattr(final_message, 'usage_metadata') and final_message.usage_metadata:
-                usage_data = {
-                    "input_tokens": final_message.usage_metadata.get("input_tokens", 0),
-                    "output_tokens": final_message.usage_metadata.get("output_tokens", 0),
-                    "total_tokens": final_message.usage_metadata.get("total_tokens", 0),
-                }
-            
-            yield {
-                "type": "complete",
-                "response": final_message,
-                "usage": usage_data,
-            }
-            
-        except asyncio.TimeoutError:
-            error_msg = f"LLM 调用超时（{self.timeout}秒）"
-            if self.logger:
-                self.logger.log_error("stream_call", Exception(error_msg))
-            yield {
-                "type": "error",
-                "message": error_msg
-            }
-        except Exception as e:
-            if self.logger:
-                self.logger.log_error("stream_call", e)
-            yield {
-                "type": "error",
-                "message": str(e)
-            }
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, self.retry_max_delay)
+                    accumulated_content = ""
+                    accumulated_tool_call_chunks = {}
+                    has_content = False
+                else:
+                    error_msg = f"LLM 调用超时（{self.timeout}秒），已重试{self.retry_max_count}次"
+                    if self.logger:
+                        self.logger.log_error("stream_call", Exception(error_msg))
+                    yield {
+                        "type": "error",
+                        "message": error_msg
+                    }
+                    return
+            except Exception as e:
+                self._dump_error_request_data(request_params, e)
+                if self._is_retryable_error(e) and retry_attempt < self.retry_max_count:
+                    if self.logger:
+                        self.logger.log_error("stream_call_retry", Exception(
+                            f"LLM 调用异常（{type(e).__name__}: {str(e)[:100]}），第{retry_attempt + 1}次重试，等待{delay}秒"
+                        ))
+                    yield {
+                        "type": "retry",
+                        "attempt": retry_attempt + 1,
+                        "delay": delay,
+                        "message": f"LLM 调用异常（{type(e).__name__}），{delay}秒后重试"
+                    }
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, self.retry_max_delay)
+                    accumulated_content = ""
+                    accumulated_tool_call_chunks = {}
+                    has_content = False
+                else:
+                    if self.logger:
+                        self.logger.log_error("stream_call", e)
+                    yield {
+                        "type": "error",
+                        "message": str(e)
+                    }
+                    return
     
     def get_usage_stats(self) -> Dict[str, int]:
-        """获取使用量统计
-        
-        Returns:
-            Dict[str, int]: 使用量统计字典
-        """
         return self.usage_stats.to_dict()
     
     def reset_usage_stats(self):
-        """重置使用量统计"""
         self.usage_stats.reset()
+    
+    @staticmethod
+    def _is_retryable_error(e: Exception) -> bool:
+        try:
+            if isinstance(e, (openai.APITimeoutError, openai.APIConnectionError,
+                              openai.RateLimitError)):
+                return True
+        except AttributeError:
+            pass
+        
+        if isinstance(e, (ConnectionError, ConnectionResetError, ConnectionAbortedError,
+                          BrokenPipeError, OSError)):
+            return True
+        
+        try:
+            if isinstance(e, openai.APIStatusError) and e.status_code >= 500:
+                return True
+        except AttributeError:
+            pass
+        
+        error_str = str(e).lower()
+        retryable_keywords = [
+            "rate limit", "rate_limit", "429",
+            "timeout", "timed out",
+            "connection", "network",
+            "server error", "500", "502", "503", "504",
+            "overloaded", "capacity",
+            "null value for 'choices'",
+        ]
+        return any(kw in error_str for kw in retryable_keywords)
+    
+    def _convert_messages_to_openai(self, messages: List[BaseMessage]) -> List[Dict[str, Any]]:
+        result = []
+        for msg in messages:
+            if isinstance(msg, SystemMessage):
+                result.append({"role": "system", "content": msg.content})
+            elif isinstance(msg, HumanMessage):
+                result.append({"role": "user", "content": msg.content})
+            elif isinstance(msg, AIMessage):
+                entry: Dict[str, Any] = {"role": "assistant", "content": msg.content or ""}
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    openai_tool_calls = []
+                    for tc in msg.tool_calls:
+                        if isinstance(tc, dict):
+                            openai_tool_calls.append({
+                                "id": tc.get("id", ""),
+                                "type": "function",
+                                "function": {
+                                    "name": tc.get("name", ""),
+                                    "arguments": json.dumps(tc.get("args", {}), ensure_ascii=False)
+                                }
+                            })
+                        else:
+                            openai_tool_calls.append({
+                                "id": tc["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": tc["name"],
+                                    "arguments": json.dumps(tc["args"], ensure_ascii=False)
+                                }
+                            })
+                    entry["tool_calls"] = openai_tool_calls
+                result.append(entry)
+            elif isinstance(msg, ToolMessage):
+                content = msg.content
+                if not isinstance(content, str):
+                    content = json.dumps(content, ensure_ascii=False)
+                result.append({
+                    "role": "tool",
+                    "content": content,
+                    "tool_call_id": msg.tool_call_id or ""
+                })
+            else:
+                result.append({"role": getattr(msg, 'type', 'user'), "content": msg.content})
+        
+        return result
+    
+    def _convert_openai_response_to_aimessage(self, response) -> AIMessage:
+        choice = response.choices[0] if response.choices else None
+        if not choice:
+            return AIMessage(content="")
+        
+        message = choice.message
+        content = message.content or ""
+        
+        tool_calls = []
+        if message.tool_calls:
+            for tc in message.tool_calls:
+                try:
+                    args = json.loads(tc.function.arguments) if tc.function.arguments else {}
+                except json.JSONDecodeError:
+                    args = {}
+                tool_calls.append({
+                    "id": tc.id,
+                    "name": tc.function.name,
+                    "args": args
+                })
+        
+        usage_metadata = {}
+        if response.usage:
+            usage_metadata = {
+                "input_tokens": response.usage.prompt_tokens,
+                "output_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens,
+            }
+        
+        aimessage = AIMessage(content=content, tool_calls=tool_calls)
+        if usage_metadata:
+            aimessage.usage_metadata = usage_metadata
+        
+        return aimessage
+    
+    def _build_request_params(
+        self,
+        openai_messages: List[Dict[str, Any]],
+        use_tools: bool,
+        stream: bool = False
+    ) -> Dict[str, Any]:
+        params: Dict[str, Any] = {
+            "model": self.model,
+            "messages": openai_messages,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }
+        
+        if stream:
+            params["stream"] = True
+        
+        if use_tools and self.tools:
+            if self._tool_schemas is None:
+                self.bind_tools()
+            if self._tool_schemas:
+                params["tools"] = self._tool_schemas
+        
+        return params
+    
+    def _dump_error_request_data(self, request_params: Dict[str, Any], error: Exception) -> None:
+        try:
+            logs_dir = os.path.join(os.getcwd(), "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"llm_error_req_data_{timestamp}.log"
+            filepath = os.path.join(logs_dir, filename)
+            
+            dump_data = {
+                "error_type": type(error).__name__,
+                "error_message": str(error),
+                "timestamp": datetime.now().isoformat(),
+                "request": request_params
+            }
+            
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(dump_data, f, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            pass
     
     def _prepare_messages(
         self,
         messages: List[BaseMessage]
     ) -> List[BaseMessage]:
-        """准备消息列表
-        
-        Args:
-            messages: 原始消息列表
-            
-        Returns:
-            List[BaseMessage]: 准备好的消息列表
-        """
         full_messages = []
         
         if self.system_prompt:
@@ -508,30 +588,7 @@ class LLMCaller:
         
         return full_messages
     
-    def _get_llm_with_tools(self, use_tools: bool):
-        """获取带工具绑定的 LLM
-        
-        Args:
-            use_tools: 是否使用工具
-            
-        Returns:
-            LLM 实例（可能绑定了工具）
-        """
-        if use_tools and self.tools:
-            if self._bound_llm is None:
-                self.bind_tools()
-            return self._bound_llm if self._bound_llm else self.llm
-        return self.llm
-    
     def _get_tool_schemas(self, tools: List[BaseTool]) -> List[Dict[str, Any]]:
-        """获取工具 schema 列表
-        
-        Args:
-            tools: 工具列表
-            
-        Returns:
-            List[Dict[str, Any]]: 工具 schema
-        """
         schemas = []
         for tool in tools:
             tool_def = None
@@ -608,14 +665,6 @@ class LLMCaller:
         return schemas
     
     def _clean_schema(self, schema: Dict[str, Any]) -> Dict[str, Any]:
-        """清理 schema，移除不需要的字段
-        
-        Args:
-            schema: 原始 schema
-            
-        Returns:
-            Dict[str, Any]: 清理后的 schema
-        """
         cleaned = {}
         
         if 'type' in schema:
@@ -637,11 +686,6 @@ class LLMCaller:
         return cleaned
     
     def _update_usage(self, response: AIMessage) -> None:
-        """更新使用量统计
-        
-        Args:
-            response: AI 响应
-        """
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             self.usage_stats.update(
                 prompt_tokens=response.usage_metadata.get("input_tokens", 0),

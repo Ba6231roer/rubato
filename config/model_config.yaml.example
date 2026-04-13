@@ -23,69 +23,48 @@ model:
   
   # 认证方式 (可选)
   # 某些提供商可能需要特殊的认证头
-  # 例如: "Bearer", "X-API-Key" 等
   auth: null
   
   # API 基础 URL (可选)
   # 用于自定义 API 端点或代理
-  # 默认使用提供商的官方 API 地址
   base_url: null
   
   # 温度参数 (可选，默认: 0.7)
-  # 控制模型输出的随机性
-  # 范围: 0.0 - 1.0
-  # 0.0: 最确定性，适合代码生成
-  # 1.0: 最随机，适合创意写作
   temperature: 0.7
   
   # 最大令牌数 (可选，默认: 2000)
-  # 控制模型输出的最大长度
-  # 根据任务需求调整，注意成本控制
   max_tokens: 2000
-
-# ========================================
-# 备用模型配置 (可选)
-# ========================================
-# 当主模型不可用时，系统会自动切换到备用模型
-# 如果不需要备用模型，可以删除此配置块
-fallback_model:
-  # 模型提供商
-  provider: "anthropic"
-  
-  # 模型名称
-  name: "claude-3-sonnet"
-  
-  # API 密钥
-  api_key: "${ANTHROPIC_API_KEY}"
-  
-  # API 基础 URL (可选)
-  base_url: null
 
 # ========================================
 # 模型参数配置
 # ========================================
 parameters:
-  # 重试次数 (默认: 3)
-  # 当 API 调用失败时的最大重试次数
-  retry_times: 3
+  # LLM 调用超时时间 (默认: 300.0 秒)
+  # 单次 LLM 流式调用的最大等待时间
+  # 超过此时间将触发超时重试
+  llm_timeout: 300.0
   
-  # 重试延迟 (默认: 1.0 秒)
-  # 每次重试之间的等待时间（秒）
-  retry_delay: 1.0
+  # 最大重试次数 (默认: 3)
+  # LLM 调用超时后的最大重试次数
+  retry_max_count: 3
   
-  # 超时时间 (默认: 30.0 秒)
-  # API 请求的最大等待时间（秒）
-  timeout: 30.0
+  # 初始重试等待时间 (默认: 10.0 秒)
+  # 首次重试前的等待时间
+  retry_initial_delay: 10.0
+  
+  # 单次重试最大等待时间 (默认: 60.0 秒)
+  # 每次重试等待时间翻倍，但不超过此值
+  # 例如: 初始10秒 -> min(20, 60)=20秒 -> min(40, 60)=40秒 -> min(80, 60)=60秒
+  retry_max_delay: 60.0
 
 # ========================================
 # 多种模型提供商配置示例
 # ========================================
-# 以下是不同提供商的配置示例，根据需要取消注释并修改
 
 # --- OpenAI 配置示例 ---
 # model:
 #   provider: "openai"
-#   name: "gpt-4"  # 可选: "gpt-4-turbo", "gpt-3.5-turbo", "gpt-4o"
+#   name: "gpt-4"
 #   api_key: "${OPENAI_API_KEY}"
 #   temperature: 0.7
 #   max_tokens: 2000
@@ -93,7 +72,7 @@ parameters:
 # --- Anthropic 配置示例 ---
 # model:
 #   provider: "anthropic"
-#   name: "claude-3-sonnet"  # 可选: "claude-3-opus", "claude-3-haiku"
+#   name: "claude-3-sonnet"
 #   api_key: "${ANTHROPIC_API_KEY}"
 #   temperature: 0.7
 #   max_tokens: 2000
@@ -101,63 +80,8 @@ parameters:
 # --- 本地模型配置示例 ---
 # model:
 #   provider: "local"
-#   name: "llama-2-70b"  # 本地模型名称
-#   api_key: "local"  # 本地模型可能不需要真实密钥
-#   base_url: "http://localhost:8000/v1"  # 本地模型服务地址
+#   name: "llama-2-70b"
+#   api_key: "local"
+#   base_url: "http://localhost:8000/v1"
 #   temperature: 0.7
 #   max_tokens: 2000
-
-# --- 使用代理或自定义端点 ---
-# model:
-#   provider: "openai"
-#   name: "gpt-4"
-#   api_key: "${OPENAI_API_KEY}"
-#   base_url: "https://your-proxy.com/v1"  # 自定义 API 端点
-#   temperature: 0.7
-#   max_tokens: 2000
-
-# ========================================
-# 环境变量配置说明
-# ========================================
-# 在使用此配置前，请确保已设置以下环境变量：
-#
-# Windows (PowerShell):
-#   $env:OPENAI_API_KEY="your-openai-api-key"
-#   $env:ANTHROPIC_API_KEY="your-anthropic-api-key"
-#
-# Windows (命令提示符):
-#   set OPENAI_API_KEY=your-openai-api-key
-#   set ANTHROPIC_API_KEY=your-anthropic-api-key
-#
-# Linux/macOS:
-#   export OPENAI_API_KEY="your-openai-api-key"
-#   export ANTHROPIC_API_KEY="your-anthropic-api-key"
-#
-# 或者在 .env 文件中设置:
-#   OPENAI_API_KEY=your-openai-api-key
-#   ANTHROPIC_API_KEY=your-anthropic-api-key
-
-# ========================================
-# 完整配置示例
-# ========================================
-# 以下是一个包含所有配置项的完整示例：
-
-# model:
-#   provider: "openai"
-#   name: "gpt-4-turbo"
-#   api_key: "${OPENAI_API_KEY}"
-#   auth: "Bearer"
-#   base_url: "https://api.openai.com/v1"
-#   temperature: 0.7
-#   max_tokens: 4000
-# 
-# fallback_model:
-#   provider: "anthropic"
-#   name: "claude-3-sonnet"
-#   api_key: "${ANTHROPIC_API_KEY}"
-#   base_url: null
-# 
-# parameters:
-#   retry_times: 3
-#   retry_delay: 1.5
-#   timeout: 60.0

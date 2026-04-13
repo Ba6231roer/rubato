@@ -4,7 +4,7 @@ from langchain_core.tools import BaseTool
 from typing import List, Optional
 import time
 
-from .llm_wrapper import RobustChatOpenAI
+from .llm_wrapper import LLMCaller
 from ..config.models import AppConfig, RoleConfig
 from ..mcp.tools import ToolRegistry
 from ..skills.loader import SkillLoader
@@ -45,7 +45,12 @@ class RubatoAgent:
         self.logger.set_tool_log_mode(self.logging_config.tool_log_mode)
         
         self.llm = self._create_llm()
-        self._current_system_prompt = self._load_system_prompt()
+        
+        self._role_skills: Optional[List[str]] = None
+        if role_config and role_config.tools and role_config.tools.skills:
+            self._role_skills = role_config.tools.skills
+        
+        self._current_system_prompt = self._build_system_prompt_with_skills(self._load_system_prompt())
         
         self.max_context_tokens = (
             role_config.execution.max_context_tokens
@@ -67,10 +72,6 @@ class RubatoAgent:
             else config.agent.execution.sub_agent_recursion_limit
         )
         
-        self._role_skills: Optional[List[str]] = None
-        if role_config and role_config.tools and role_config.tools.skills:
-            self._role_skills = role_config.tools.skills
-        
         self.tools = self._get_tools_for_role()
         
         self._sub_agent_manager = SubAgentManager(
@@ -81,8 +82,7 @@ class RubatoAgent:
             recursion_limit=sub_agent_recursion_limit
         )
         
-        spawn_agent_tool = create_spawn_agent_tool(self._sub_agent_manager)
-        self.tools.append(spawn_agent_tool)
+        self._ensure_spawn_agent_tool()
         
         self._file_state_cache = FileStateCache()
         self._query_engine: QueryEngine = self._create_query_engine()
@@ -143,6 +143,10 @@ class RubatoAgent:
             tool_result_persist_threshold=getattr(self.compression_config, 'tool_result_persist_threshold', 50000),
             tool_result_budget_per_message=getattr(self.compression_config, 'tool_result_budget_per_message', 200000),
             max_consecutive_failures=getattr(self.compression_config, 'max_consecutive_failures', 3),
+            llm_timeout=float(self.config.agent.execution.llm_timeout),
+            retry_max_count=self.config.model.parameters.retry_max_count,
+            retry_initial_delay=self.config.model.parameters.retry_initial_delay,
+            retry_max_delay=self.config.model.parameters.retry_max_delay,
         )
         
         return QueryEngine(query_config)
@@ -162,18 +166,13 @@ class RubatoAgent:
         
         config = model_config if model_config is not None else self.config.model.model
 
-        llm_kwargs = {
-            "model": config.name,
-            "api_key": config.api_key,
-            "base_url": config.base_url,
-            "temperature": config.temperature,
-            "max_tokens": config.max_tokens,
-            "default_headers": {"Authorization": config.auth} if config.auth else None,
-            "callbacks": [self.logger.get_callback_handler()]
-        }
-        
-        return RobustChatOpenAI(
-            **llm_kwargs
+        return LLMCaller(
+            api_key=config.api_key,
+            model=config.name,
+            base_url=config.base_url,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            default_headers={"Authorization": config.auth} if config.auth else None,
         )
     
     def _get_tools_for_role(self) -> List[BaseTool]:
@@ -194,6 +193,32 @@ class RubatoAgent:
             "tool_names": [tool.name for tool in all_tools]
         })
         return all_tools
+    
+    def _should_enable_spawn_agent(self) -> bool:
+        if not self.role_config or not self.role_config.tools or not self.role_config.tools.builtin:
+            return True
+        builtin = self.role_config.tools.builtin
+        if isinstance(builtin, dict):
+            return builtin.get('spawn_agent', True)
+        return True
+
+    def _ensure_spawn_agent_tool(self) -> None:
+        should_enable = self._should_enable_spawn_agent()
+        has_spawn_agent = any(t.name == 'spawn_agent' for t in self.tools)
+        
+        if should_enable and not has_spawn_agent:
+            spawn_agent_tool = create_spawn_agent_tool(self._sub_agent_manager)
+            self.tools.append(spawn_agent_tool)
+            self.logger.log_agent_action("spawn_agent_added", {
+                "reason": "tool_missing_from_list",
+                "role": self.get_role_name()
+            })
+        elif not should_enable and has_spawn_agent:
+            self.tools = [t for t in self.tools if t.name != 'spawn_agent']
+            self.logger.log_agent_action("spawn_agent_removed", {
+                "reason": "disabled_by_role_config",
+                "role": self.get_role_name()
+            })
     
     def _load_system_prompt(self) -> str:
         if self.role_config and self.role_config.system_prompt_file:
@@ -268,6 +293,31 @@ class RubatoAgent:
             skills=skills,
             include_examples=include_examples
         )
+    
+    def _build_system_prompt_with_skills(self, base_prompt: str) -> str:
+        if not self._role_skills or not self.skill_loader:
+            return base_prompt
+        
+        skill_contents = []
+        for skill_name in self._role_skills:
+            content = self.skill_loader.get_skill_content_sync(skill_name)
+            if content and isinstance(content, str):
+                skill_contents.append(f"## {skill_name}\n\n{content}")
+                self.context_manager.mark_skill_loaded(skill_name)
+                self.logger.log_agent_action("skill_full_loaded", {
+                    "skill": skill_name,
+                    "content_length": len(content)
+                })
+            else:
+                self.logger.log_agent_action("skill_content_unavailable", {
+                    "skill": skill_name
+                })
+        
+        if skill_contents:
+            skills_section = "\n\n# 角色专用 Skills\n\n" + "\n\n".join(skill_contents)
+            return f"{base_prompt}\n{skills_section}"
+        
+        return base_prompt
     
     def _get_default_system_prompt(self) -> str:
         return """你是Rubato，一个专业的自动化测试执行助手。
@@ -348,8 +398,8 @@ class RubatoAgent:
             self._current_system_prompt = enhanced_prompt
             self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
-        
-        self._query_engine = self._create_query_engine()
+        elif self._query_engine is None:
+            self._query_engine = self._create_query_engine()
         
         self.logger.log_agent_action("query_engine_start", {
             "session_id": self._query_engine.get_session_id(),
@@ -443,8 +493,8 @@ class RubatoAgent:
             self._current_system_prompt = enhanced_prompt
             self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
-        
-        self._query_engine = self._create_query_engine()
+        elif self._query_engine is None:
+            self._query_engine = self._create_query_engine()
         
         self.logger.log_agent_action("query_engine_stream_start", {
             "session_id": self._query_engine.get_session_id(),
@@ -572,9 +622,8 @@ class RubatoAgent:
                 sub_agents_dir="sub_agents",
                 recursion_limit=sub_agent_recursion_limit
             )
-            spawn_agent_tool = create_spawn_agent_tool(self._sub_agent_manager)
-            self.tools = [t for t in self.tools if t.name != 'spawn_agent']
-            self.tools.append(spawn_agent_tool)
+        
+        self._ensure_spawn_agent_tool()
         
         self._rebuild_query_engine()
         
@@ -594,7 +643,7 @@ class RubatoAgent:
             
             config_changes = self._reload_execution_config()
         
-        self._current_system_prompt = self._load_system_prompt()
+        self._current_system_prompt = self._build_system_prompt_with_skills(self._load_system_prompt())
         self._rebuild_query_engine()
         
         log_data = {
@@ -613,8 +662,6 @@ class RubatoAgent:
         
         config_changes = self._reload_execution_config()
         
-        self._rebuild_query_engine()
-        
         self.logger.log_agent_action("tools_reloaded", {
             "tool_count": len(self.tools),
             "tool_names": [tool.name for tool in self.tools],
@@ -623,7 +670,7 @@ class RubatoAgent:
     
     def update_role_skills(self, skills: Optional[List[str]]) -> None:
         self._role_skills = skills
-        self._current_system_prompt = self._load_system_prompt()
+        self._current_system_prompt = self._build_system_prompt_with_skills(self._load_system_prompt())
         self._rebuild_query_engine()
         
         self.logger.log_agent_action("role_skills_updated", {
@@ -633,40 +680,11 @@ class RubatoAgent:
     
     async def load_role_skills(self, skills: Optional[List[str]]) -> None:
         self._role_skills = skills
-        
-        if not skills or not self.skill_loader:
-            self._current_system_prompt = self._load_system_prompt()
-            self._rebuild_query_engine()
-            return
-        
-        skill_contents = []
-        for skill_name in skills:
-            if self.skill_loader.has_skill(skill_name):
-                content = await self.skill_loader.load_full_skill(skill_name)
-                if content:
-                    skill_contents.append(f"## {skill_name}\n\n{content}")
-                    self.context_manager.mark_skill_loaded(skill_name)
-                    self.logger.log_agent_action("skill_full_loaded", {
-                        "skill": skill_name,
-                        "content_length": len(content)
-                    })
-            else:
-                self.logger.log_agent_action("skill_not_found", {
-                "skill": skill_name
-            })
-        
-        if skill_contents:
-            skills_section = "\n\n# 角色专用 Skills\n\n" + "\n\n".join(skill_contents)
-            base_prompt = self._load_system_prompt()
-            self._current_system_prompt = f"{base_prompt}\n{skills_section}"
-        else:
-            self._current_system_prompt = self._load_system_prompt()
-        
+        self._current_system_prompt = self._build_system_prompt_with_skills(self._load_system_prompt())
         self._rebuild_query_engine()
         
         self.logger.log_agent_action("role_skills_loaded", {
-            "skills": skills,
-            "loaded_count": len(skill_contents)
+            "skills": skills
         })
     
     def clear_context(self) -> None:

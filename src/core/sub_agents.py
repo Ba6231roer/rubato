@@ -37,7 +37,8 @@ class ToolPermissionResolver:
         parent_tools: List[BaseTool],
         permissions: ToolPermissionConfig,
         tool_registry: Any,
-        available_tools: Optional[List[str]] = None
+        available_tools: Optional[List[str]] = None,
+        tool_inheritance: Optional[ToolInheritanceMode] = None
     ) -> List[BaseTool]:
         """解析工具权限
         
@@ -51,17 +52,26 @@ class ToolPermissionResolver:
             permissions: 权限配置
             tool_registry: 工具注册表
             available_tools: 可用工具列表
-            
+            tool_inheritance: 工具继承模式
+
         Returns:
             过滤后的工具列表
         """
-        if available_tools:
-            tools = tool_registry.get_tools_by_names(available_tools)
-        elif permissions.inherit_from_parent:
+        # 根据工具继承模式确定初始工具集
+        if tool_inheritance == ToolInheritanceMode.INHERIT_ALL:
             tools = list(parent_tools)
-        else:
-            tools = []
+        elif tool_inheritance == ToolInheritanceMode.INDEPENDENT:
+            if available_tools:
+                tools = tool_registry.get_tools_by_names(available_tools)
+            else:
+                tools = []
+        else:  # INHERIT_SELECTED 或 None
+            if available_tools:
+                tools = tool_registry.get_tools_by_names(available_tools)
+            else:
+                tools = list(parent_tools)
         
+        # 应用白名单
         if permissions.allowlist:
             tools = [
                 tool for tool in tools 
@@ -73,7 +83,8 @@ class ToolPermissionResolver:
                     tool = tool_registry.get_tool(tool_name)
                     if tool:
                         tools.append(tool)
-        
+                        
+        # 应用黑名单
         if permissions.denylist:
             tools = [
                 tool for tool in tools 
@@ -112,6 +123,7 @@ class ConfigInheritanceResolver:
                 "base_url": sub_agent_config.base_url,
                 "temperature": sub_agent_config.temperature,
                 "max_tokens": sub_agent_config.max_tokens,
+                "auth": sub_agent_config.auth,
             }
         
         merged = {
@@ -121,6 +133,7 @@ class ConfigInheritanceResolver:
             "base_url": getattr(parent_config, 'base_url', None),
             "temperature": getattr(parent_config, 'temperature', None),
             "max_tokens": getattr(parent_config, 'max_tokens', None),
+            "auth": getattr(parent_config, 'auth', None),
         }
         
         if sub_agent_config.provider is not None:
@@ -135,6 +148,8 @@ class ConfigInheritanceResolver:
             merged["temperature"] = sub_agent_config.temperature
         if sub_agent_config.max_tokens is not None:
             merged["max_tokens"] = sub_agent_config.max_tokens
+        if sub_agent_config.auth is not None:
+            merged["auth"] = sub_agent_config.auth
         
         return merged
 
@@ -558,29 +573,15 @@ class SubAgentManager:
             工具列表
         """
         parent_tools = self.parent_agent.tools
-        
-        if definition.tool_inheritance == ToolInheritanceMode.INHERIT_ALL:
-            tools = list(parent_tools)
-        elif definition.tool_inheritance == ToolInheritanceMode.INDEPENDENT:
-            if definition.available_tools:
-                tools = self.parent_agent.tool_registry.get_tools_by_names(
-                    definition.available_tools
-                )
-            else:
-                tools = []
-        else:  # INHERIT_SELECTED
-            if definition.available_tools:
-                tools = self.parent_agent.tool_registry.get_tools_by_names(
-                    definition.available_tools
-                )
-            else:
-                tools = list(parent_tools)
+        # 直接使用 ToolPermissionResolver.resolve() 方法获取工具列表
+        # 该方法已经包含了根据 tool_inheritance 模式和 available_tools 确定工具列表的逻辑
         
         tools = ToolPermissionResolver.resolve(
             parent_tools=parent_tools,
             permissions=definition.tool_permissions,
             tool_registry=self.parent_agent.tool_registry,
-            available_tools=definition.available_tools
+            available_tools=definition.available_tools,
+            tool_inheritance=definition.tool_inheritance
         )
         
         return tools
@@ -759,14 +760,15 @@ class SubAgentManager:
         )
         
         if model_config.get("name") and model_config.get("api_key"):
-            from langchain_openai import ChatOpenAI
+            from .llm_wrapper import LLMCaller
             
-            return ChatOpenAI(
-                model=model_config.get("name"),
+            return LLMCaller(
                 api_key=model_config.get("api_key"),
+                model=model_config.get("name"),
                 base_url=model_config.get("base_url"),
                 temperature=model_config.get("temperature", 0.7),
-                max_tokens=model_config.get("max_tokens", 2000)
+                max_tokens=model_config.get("max_tokens", 2000),
+                default_headers={"Authorization": model_config.get("auth")} if model_config.get("auth") else None
             )
         
         return self.llm
@@ -832,6 +834,10 @@ class SubAgentManager:
             max_tokens=max_tokens,
             compression_enabled=compression_enabled,
             max_context_tokens=max_context_tokens,
+            llm_timeout=float(definition.execution.timeout),
+            retry_max_count=self.parent_agent.config.model.parameters.retry_max_count if hasattr(self.parent_agent, 'config') else 3,
+            retry_initial_delay=self.parent_agent.config.model.parameters.retry_initial_delay if hasattr(self.parent_agent, 'config') else 10.0,
+            retry_max_delay=self.parent_agent.config.model.parameters.retry_max_delay if hasattr(self.parent_agent, 'config') else 60.0,
         )
         
         return QueryEngine(query_config)

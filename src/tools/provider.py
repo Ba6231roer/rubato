@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Callable, Any
+from typing import List, Any
 from langchain_core.tools import BaseTool
 from .shell import RubatoShellTool
 
@@ -50,14 +50,9 @@ class LocalToolProvider(ToolProvider):
         self._initialize_tools()
     
     def _initialize_tools(self) -> None:
-        """初始化工具实例"""
         for tool_item in self._tool_classes:
             if isinstance(tool_item, BaseTool):
                 self._tools.append(tool_item)
-            elif callable(tool_item):
-                tool_instance = tool_item
-                if isinstance(tool_instance, BaseTool):
-                    self._tools.append(tool_instance)
             elif isinstance(tool_item, type) and issubclass(tool_item, BaseTool):
                 self._tools.append(tool_item())
     
@@ -80,15 +75,8 @@ class LocalToolProvider(ToolProvider):
         return True
     
     def add_tool(self, tool: Any) -> None:
-        """添加工具
-        
-        Args:
-            tool: 工具类或工具实例
-        """
         self._tool_classes.append(tool)
         if isinstance(tool, BaseTool):
-            self._tools.append(tool)
-        elif callable(tool) and isinstance(tool, BaseTool):
             self._tools.append(tool)
         elif isinstance(tool, type) and issubclass(tool, BaseTool):
             self._tools.append(tool())

@@ -58,11 +58,11 @@ execution:
   # - 建议值：50
   sub_agent_recursion_limit: 50
 
-  # 默认超时时间（秒）
-  # - 单个操作的最大执行时间
+  # LLM 调用超时时间（秒）
+  # - 单次 LLM 流式调用的最大等待时间
   # - 超过此时间将中断操作并报错
   # - 建议值：300（5分钟）
-  default_timeout: 300
+  llm_timeout: 300
 
 # ============================================================
 # 日志配置
@@ -110,7 +110,7 @@ logging:
 # execution:
 #   recursion_limit: 50
 #   sub_agent_recursion_limit: 25
-#   default_timeout: 180
+#   llm_timeout: 180
 # logging:
 #   log_token_estimation: true
 #   log_compression_stats: false
@@ -129,7 +129,7 @@ logging:
 # execution:
 #   recursion_limit: 150
 #   sub_agent_recursion_limit: 75
-#   default_timeout: 600
+#   llm_timeout: 600
 # logging:
 #   log_token_estimation: true
 #   log_compression_stats: true
@@ -148,7 +148,7 @@ logging:
 # execution:
 #   recursion_limit: 100
 #   sub_agent_recursion_limit: 50
-#   default_timeout: 300
+#   llm_timeout: 300
 # logging:
 #   log_token_estimation: true
 #   log_compression_stats: true
@@ -167,7 +167,7 @@ logging:
 # execution:
 #   recursion_limit: 100
 #   sub_agent_recursion_limit: 50
-#   default_timeout: 300
+#   llm_timeout: 300
 # logging:
 #   log_token_estimation: false
 #   log_compression_stats: false

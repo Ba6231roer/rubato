@@ -198,6 +198,10 @@ class QueryEngineConfig:
     tool_result_persist_threshold: int = 50000
     tool_result_budget_per_message: int = 200000
     max_consecutive_failures: int = 3
+    llm_timeout: Optional[float] = None
+    retry_max_count: int = 3
+    retry_initial_delay: float = 10.0
+    retry_max_delay: float = 60.0
 
 
 class QueryEngine:
@@ -218,15 +222,30 @@ class QueryEngine:
         self.logger = get_llm_logger()
         
         # 创建 LLMCaller，传递 logger 和 timeout
-        timeout = config.max_budget_usd or 300.0
-        self.llm_caller = LLMCaller(
-            llm=config.llm,
-            tools=config.tools,
-            system_prompt=config.custom_system_prompt,
-            logger=self.logger,
-            timeout=timeout,
-            max_context_tokens=config.max_context_tokens
-        )
+        timeout = config.llm_timeout if config.llm_timeout is not None else 300.0
+        
+        if isinstance(config.llm, LLMCaller):
+            self.llm_caller = config.llm
+            self.llm_caller.tools = config.tools
+            self.llm_caller.system_prompt = config.custom_system_prompt
+            self.llm_caller.logger = self.logger
+            self.llm_caller.timeout = timeout
+            self.llm_caller.max_context_tokens = config.max_context_tokens
+            self.llm_caller.retry_max_count = config.retry_max_count
+            self.llm_caller.retry_initial_delay = config.retry_initial_delay
+            self.llm_caller.retry_max_delay = config.retry_max_delay
+        else:
+            self.llm_caller = LLMCaller(
+                llm=config.llm,
+                tools=config.tools,
+                system_prompt=config.custom_system_prompt,
+                logger=self.logger,
+                timeout=timeout,
+                max_context_tokens=config.max_context_tokens,
+                retry_max_count=config.retry_max_count,
+                retry_initial_delay=config.retry_initial_delay,
+                retry_max_delay=config.retry_max_delay,
+            )
         
         self._tool_map: Dict[str, BaseTool] = {
             tool.name: tool for tool in config.tools

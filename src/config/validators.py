@@ -1,6 +1,9 @@
-from pydantic import ValidationError
-from typing import List, Any
+import re
 import os
+from pathlib import Path
+from typing import List, Any, Optional
+
+from pydantic import ValidationError
 
 
 class ConfigValidationError(Exception):
@@ -43,3 +46,26 @@ def handle_pydantic_error(error: ValidationError) -> ConfigValidationError:
         loc = " -> ".join(str(x) for x in err['loc'])
         messages.append(f"{loc}: {err['msg']}")
     return ConfigValidationError(f"配置验证失败：\n" + "\n".join(messages))
+
+
+def replace_env_vars(content: str, config_dir: Optional[Path] = None) -> str:
+    """替换环境变量，支持系统环境变量和特殊变量
+
+    Args:
+        content: 需要替换的文本内容
+        config_dir: 配置目录路径，支持 PROJECT_ROOT 和 CONFIG_DIR 特殊变量
+    """
+    pattern = r'\$\{([^}]+)\}'
+
+    def replacer(match):
+        env_var = match.group(1)
+        if config_dir is not None:
+            if env_var == 'PROJECT_ROOT':
+                return str(config_dir.parent.resolve())
+            elif env_var == 'CONFIG_DIR':
+                return str(config_dir.resolve())
+        if env_var == 'HOME':
+            return str(Path.home())
+        return os.getenv(env_var, "")
+
+    return re.sub(pattern, replacer, content)

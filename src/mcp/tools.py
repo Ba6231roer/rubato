@@ -69,6 +69,13 @@ class ToolRegistry:
 _tool_registry: Optional[ToolRegistry] = None
 
 
+def _ensure_global_registry() -> ToolRegistry:
+    global _tool_registry
+    if _tool_registry is None:
+        _tool_registry = ToolRegistry()
+    return _tool_registry
+
+
 def get_tool_registry() -> ToolRegistry:
     """获取全局工具注册表
     
@@ -81,10 +88,7 @@ def get_tool_registry() -> ToolRegistry:
         DeprecationWarning,
         stacklevel=2
     )
-    global _tool_registry
-    if _tool_registry is None:
-        _tool_registry = ToolRegistry()
-    return _tool_registry
+    return _ensure_global_registry()
 
 
 def register_mcp_tools(tools: List[BaseTool]) -> None:
@@ -99,8 +103,7 @@ def register_mcp_tools(tools: List[BaseTool]) -> None:
         DeprecationWarning,
         stacklevel=2
     )
-    registry = get_tool_registry()
-    registry.register_all(tools)
+    _ensure_global_registry().register_all(tools)
 
 
 def get_all_tools() -> List[BaseTool]:
@@ -115,7 +118,7 @@ def get_all_tools() -> List[BaseTool]:
         DeprecationWarning,
         stacklevel=2
     )
-    return get_tool_registry().get_all_tools()
+    return _ensure_global_registry().get_all_tools()
 
 
 def get_tools_by_names(names: List[str]) -> List[BaseTool]:
@@ -130,4 +133,4 @@ def get_tools_by_names(names: List[str]) -> List[BaseTool]:
         DeprecationWarning,
         stacklevel=2
     )
-    return get_tool_registry().get_tools_by_names(names)
+    return _ensure_global_registry().get_tools_by_names(names)

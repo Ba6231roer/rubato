@@ -137,13 +137,13 @@ class RoleCommand(BaseCommand):
             context.agent.role_config = role
             context.agent.reload_tools(new_tool_registry)
             
-            await context.agent.load_role_skills(role_skills)
-            
             merged_model = context.role_manager.get_merged_model_config(name)
             if merged_model:
-                context.agent.llm = context.agent._create_llm()
+                context.agent.llm = context.agent._create_llm(merged_model)
             
-            tools_info = self._get_tools_summary(new_tool_registry)
+            await context.agent.load_role_skills(role_skills)
+            
+            tools_info = self._get_tools_summary(new_tool_registry, context.agent.tools)
             
             skills_info = ""
             if role_skills:
@@ -185,8 +185,8 @@ class RoleCommand(BaseCommand):
                 message=f"切换角色时发生错误：{str(e)}"
             )
     
-    def _get_tools_summary(self, tool_registry) -> str:
-        tools = tool_registry.get_all_tools()
+    def _get_tools_summary(self, tool_registry, agent_tools=None) -> str:
+        tools = agent_tools if agent_tools is not None else tool_registry.get_all_tools()
         if not tools:
             return "工具: 无"
         

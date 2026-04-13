@@ -21,6 +21,10 @@ class PersistedToolResult:
     has_more: bool
 
 
+def _get_tool_content(msg: ToolMessage) -> str:
+    return msg.content if isinstance(msg.content, str) else str(msg.content)
+
+
 class ToolResultStorage:
     def __init__(
         self,
@@ -125,7 +129,7 @@ def apply_tool_result_budget(
     modified_messages: List[BaseMessage] = []
     newly_replaced: List[Dict] = []
 
-    fresh_tool_results: List[Tuple[str, str, str]] = []
+    fresh_tool_data: Dict[str, Dict] = {}
     fresh_indices: Dict[str, int] = {}
 
     for i, msg in enumerate(messages):
@@ -150,38 +154,34 @@ def apply_tool_result_budget(
                 if tool_name in skip_tool_names:
                     modified_messages.append(msg)
                 else:
-                    content = msg.content if isinstance(msg.content, str) else str(msg.content)
+                    content = _get_tool_content(msg)
                     msg_index = len(modified_messages)
                     fresh_indices[tool_use_id] = msg_index
-                    fresh_tool_results.append((tool_use_id, tool_name, content))
+                    fresh_tool_data[tool_use_id] = {"tool_name": tool_name, "content": content}
                     modified_messages.append(msg)
         else:
             modified_messages.append(msg)
 
-    total_chars = sum(len(c) for _, _, c in fresh_tool_results)
+    total_chars = sum(len(d["content"]) for d in fresh_tool_data.values())
 
     if total_chars <= storage.message_budget:
         return modified_messages, newly_replaced
 
-    sorted_fresh = sorted(fresh_tool_results, key=lambda x: len(x[2]), reverse=True)
+    sorted_ids = sorted(fresh_tool_data.keys(), key=lambda tid: len(fresh_tool_data[tid]["content"]), reverse=True)
 
     chars_to_remove = total_chars - storage.message_budget
     ids_to_replace: Set[str] = set()
 
-    for tool_use_id, tool_name, content in sorted_fresh:
+    for tool_use_id in sorted_ids:
         if chars_to_remove <= 0:
             break
         ids_to_replace.add(tool_use_id)
-        chars_to_remove -= len(content)
+        chars_to_remove -= len(fresh_tool_data[tool_use_id]["content"])
 
     for tool_use_id in ids_to_replace:
-        tool_name = None
-        content = None
-        for tid, tname, tcontent in fresh_tool_results:
-            if tid == tool_use_id:
-                tool_name = tname
-                content = tcontent
-                break
+        data = fresh_tool_data[tool_use_id]
+        tool_name = data["tool_name"]
+        content = data["content"]
 
         result = storage.persist_tool_result(content, tool_use_id)
         replacement_text = storage.build_large_tool_result_message(result)
