@@ -510,11 +510,7 @@ async def run_web_mode(port: int = 8000) -> None:
     await skill_loader.load_skill_metadata()
     
     print("正在初始化上下文管理器...")
-    context_manager = ContextManager(
-        max_tokens=4000,
-        keep_recent=4,
-        auto_compress=True
-    )
+    context_manager = ContextManager()
     
     app_state = AppState()
     
@@ -623,11 +619,7 @@ async def main_async() -> None:
     await skill_loader.load_skill_metadata()
     
     print("正在初始化上下文管理器...")
-    context_manager = ContextManager(
-        max_tokens=4000,
-        keep_recent=4,
-        auto_compress=True
-    )
+    context_manager = ContextManager()
     
     if has_enabled_mcp_servers(config):
         print("正在连接MCP服务器...")

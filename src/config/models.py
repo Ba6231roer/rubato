@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator
 from typing import Optional, List, Dict, Any
 from pathlib import Path
 from enum import Enum
@@ -8,6 +8,42 @@ class PermissionMode(str, Enum):
     ask = "ask"
     allow = "allow"
     deny = "deny"
+
+
+def _validate_positive(v):
+    if v <= 0:
+        raise ValueError('must be positive')
+    return v
+
+
+def _validate_temperature(v):
+    if v is not None and not 0 <= v <= 1:
+        raise ValueError('temperature must be between 0 and 1')
+    return v
+
+
+def _validate_permission_mode_str(v):
+    if isinstance(v, str):
+        try:
+            return PermissionMode(v)
+        except ValueError:
+            raise ValueError(f'permission_mode must be one of {[m.value for m in PermissionMode]}')
+    return v
+
+
+def _validate_permission_dict(v, field_name='permissions'):
+    if isinstance(v, dict):
+        validated = {}
+        for key, value in v.items():
+            if isinstance(value, str):
+                try:
+                    validated[key] = PermissionMode(value)
+                except ValueError:
+                    raise ValueError(f'{field_name}[{key}] must be one of {[m.value for m in PermissionMode]}')
+            else:
+                validated[key] = value
+        return validated
+    return v
 
 
 class WorkspaceConfig(BaseModel):
@@ -61,35 +97,19 @@ class FileToolsConfig(BaseModel):
     @field_validator('permission_mode', 'default_permissions', mode='before')
     @classmethod
     def validate_permission_mode(cls, v):
-        if isinstance(v, str):
-            try:
-                return PermissionMode(v)
-            except ValueError:
-                raise ValueError(f'permission_mode must be one of {[m.value for m in PermissionMode]}')
-        return v
+        return _validate_permission_mode_str(v)
 
     @field_validator('custom_permissions', mode='before')
     @classmethod
     def validate_custom_permissions(cls, v):
-        if isinstance(v, dict):
-            validated = {}
-            for key, value in v.items():
-                if isinstance(value, str):
-                    try:
-                        validated[key] = PermissionMode(value)
-                    except ValueError:
-                        raise ValueError(f'custom_permissions[{key}] must be one of {[m.value for m in PermissionMode]}')
-                else:
-                    validated[key] = value
-            return validated
-        return v
+        return _validate_permission_dict(v, 'custom_permissions')
 
 
 class WorkspaceRestrictionConfig(BaseModel):
     allowed_subdirs: List[str] = []
     excluded_patterns: List[str] = []
     read_only_dirs: List[str] = []
-    
+
     @field_validator('allowed_subdirs', 'excluded_patterns', 'read_only_dirs')
     @classmethod
     def validate_list(cls, v):
@@ -104,7 +124,7 @@ class RoleFileToolsConfig(BaseModel):
     workspace_restriction: Optional[WorkspaceRestrictionConfig] = None
     permissions: Optional[Dict[str, Any]] = None
     audit: bool = True
-    
+
     @field_validator('permissions', mode='before')
     @classmethod
     def validate_permissions(cls, v):
@@ -127,6 +147,7 @@ class RoleModelConfig(BaseModel):
     provider: Optional[str] = None
     name: Optional[str] = None
     api_key: Optional[str] = None
+    auth: Optional[str] = None
     base_url: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
@@ -134,9 +155,7 @@ class RoleModelConfig(BaseModel):
     @field_validator('temperature')
     @classmethod
     def validate_temperature(cls, v):
-        if v is not None and not 0 <= v <= 1:
-            raise ValueError('temperature must be between 0 and 1')
-        return v
+        return _validate_temperature(v)
 
 
 class RoleExecutionConfig(BaseModel):
@@ -148,9 +167,7 @@ class RoleExecutionConfig(BaseModel):
     @field_validator('max_context_tokens', 'timeout')
     @classmethod
     def validate_positive(cls, v):
-        if v <= 0:
-            raise ValueError('must be positive')
-        return v
+        return _validate_positive(v)
 
 
 class RoleToolsConfig(BaseModel):
@@ -206,9 +223,7 @@ class ModelConfig(BaseModel):
     @field_validator('temperature')
     @classmethod
     def validate_temperature(cls, v):
-        if not 0 <= v <= 1:
-            raise ValueError('temperature must be between 0 and 1')
-        return v
+        return _validate_temperature(v)
 
     @field_validator('provider')
     @classmethod
@@ -219,29 +234,22 @@ class ModelConfig(BaseModel):
         return v
 
 
-class FallbackModelConfig(BaseModel):
-    provider: str
-    name: str
-    api_key: str
-    base_url: Optional[str] = None
-
-
 class ModelParameters(BaseModel):
-    retry_times: int = 3
-    retry_delay: float = 1.0
-    timeout: float = 30.0
+    model_config = ConfigDict(extra='forbid')
 
-    @field_validator('retry_times', 'retry_delay', 'timeout')
+    retry_max_count: int = 3
+    retry_initial_delay: float = 10.0
+    retry_max_delay: float = 60.0
+    llm_timeout: float = 300.0
+
+    @field_validator('retry_max_count', 'retry_initial_delay', 'retry_max_delay', 'llm_timeout')
     @classmethod
     def validate_positive(cls, v):
-        if v <= 0:
-            raise ValueError('must be positive')
-        return v
+        return _validate_positive(v)
 
 
 class FullModelConfig(BaseModel):
     model: ModelConfig
-    fallback_model: Optional[FallbackModelConfig] = None
     parameters: ModelParameters = ModelParameters()
 
 
@@ -253,9 +261,7 @@ class MCPConnectionConfig(BaseModel):
     @field_validator('retry_times', 'retry_delay', 'timeout')
     @classmethod
     def validate_positive(cls, v):
-        if v <= 0:
-            raise ValueError('must be positive')
-        return v
+        return _validate_positive(v)
 
 
 class BrowserViewportConfig(BaseModel):
@@ -323,16 +329,16 @@ class SkillsConfig(BaseModel):
 
 
 class AgentExecutionConfig(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+
     recursion_limit: int = 100
     sub_agent_recursion_limit: int = 50
-    default_timeout: int = 300
+    llm_timeout: int = 300
 
-    @field_validator('recursion_limit', 'sub_agent_recursion_limit', 'default_timeout')
+    @field_validator('recursion_limit', 'sub_agent_recursion_limit', 'llm_timeout')
     @classmethod
     def validate_positive(cls, v):
-        if v <= 0:
-            raise ValueError('must be positive')
-        return v
+        return _validate_positive(v)
 
 
 class MessageCompressionConfig(BaseModel):
@@ -341,19 +347,30 @@ class MessageCompressionConfig(BaseModel):
     keep_recent: int = 6
     summary_max_length: int = 300
     history_summary_count: int = 10
+    autocompact_buffer_tokens: int = 13000
+    manual_compact_buffer_tokens: int = 3000
+    warning_threshold_buffer_tokens: int = 20000
+    snip_keep_recent: int = 6
+    tool_result_persist_threshold: int = 50000
+    tool_result_budget_per_message: int = 200000
+    max_consecutive_failures: int = 3
 
-    @field_validator('max_tokens', 'keep_recent', 'summary_max_length', 'history_summary_count')
+    @field_validator('max_tokens', 'keep_recent', 'summary_max_length', 'history_summary_count',
+                     'autocompact_buffer_tokens', 'manual_compact_buffer_tokens',
+                     'warning_threshold_buffer_tokens', 'snip_keep_recent',
+                     'tool_result_persist_threshold', 'tool_result_budget_per_message',
+                     'max_consecutive_failures')
     @classmethod
     def validate_positive(cls, v):
-        if v <= 0:
-            raise ValueError('must be positive')
-        return v
+        return _validate_positive(v)
 
 
 class AgentLoggingConfig(BaseModel):
     log_token_estimation: bool = True
     log_compression_stats: bool = True
     log_step_details: bool = True
+    log_format: str = "compact"
+    tool_log_mode: str = "summary"
 
 
 class AgentConfig(BaseModel):
@@ -365,9 +382,7 @@ class AgentConfig(BaseModel):
     @field_validator('max_context_tokens')
     @classmethod
     def validate_positive(cls, v):
-        if v <= 0:
-            raise ValueError('must be positive')
-        return v
+        return _validate_positive(v)
 
 
 class FileToolsSubConfig(BaseModel):
@@ -381,28 +396,12 @@ class FileToolsSubConfig(BaseModel):
     @field_validator('permission_mode', mode='before')
     @classmethod
     def validate_permission_mode(cls, v):
-        if isinstance(v, str):
-            try:
-                return PermissionMode(v)
-            except ValueError:
-                raise ValueError(f'permission_mode must be one of {[m.value for m in PermissionMode]}')
-        return v
+        return _validate_permission_mode_str(v)
 
     @field_validator('permissions', mode='before')
     @classmethod
     def validate_permissions(cls, v):
-        if isinstance(v, dict):
-            validated = {}
-            for key, value in v.items():
-                if isinstance(value, str):
-                    try:
-                        validated[key] = PermissionMode(value)
-                    except ValueError:
-                        raise ValueError(f'permissions[{key}] must be one of {[m.value for m in PermissionMode]}')
-                else:
-                    validated[key] = value
-            return validated
-        return v
+        return _validate_permission_dict(v, 'permissions')
 
 
 class ShellToolConfig(BaseModel):

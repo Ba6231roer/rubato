@@ -46,7 +46,8 @@ class RoleManager:
                 temperature=role_config.model.temperature 
                     if role_config.model.temperature is not None 
                     else base_config.temperature,
-                max_tokens=role_config.model.max_tokens or base_config.max_tokens
+                max_tokens=role_config.model.max_tokens or base_config.max_tokens,
+                auth=role_config.model.auth or base_config.auth
             )
             return merged
         elif not role_config.model.inherit:
@@ -60,7 +61,8 @@ class RoleManager:
                 api_key=role_config.model.api_key or "",
                 base_url=role_config.model.base_url,
                 temperature=role_config.model.temperature or 0.7,
-                max_tokens=role_config.model.max_tokens or 2000
+                max_tokens=role_config.model.max_tokens or 2000,
+                auth=role_config.model.auth or ""
             )
             return merged
         else:

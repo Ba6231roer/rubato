@@ -6,6 +6,10 @@ import asyncio
 
 from .errors import MCPConnectionError
 
+_DEFAULT_RETRY_TIMES = 3
+_DEFAULT_RETRY_DELAY = 5
+_DEFAULT_TIMEOUT = 30
+
 
 class MCPManager:
     """MCP管理器，使用langchain-mcp-adapters
@@ -41,8 +45,55 @@ class MCPManager:
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """退出上下文管理器，断开 MCP 连接但不关闭浏览器"""
         await self.disconnect(close_browser=False)
+    
+    @staticmethod
+    def _parse_connection_config(connection_cfg: dict) -> tuple:
+        return (
+            connection_cfg.get("retry_times", _DEFAULT_RETRY_TIMES),
+            connection_cfg.get("retry_delay", _DEFAULT_RETRY_DELAY),
+            connection_cfg.get("timeout", _DEFAULT_TIMEOUT),
+        )
+    
+    async def _connect_single_server(
+        self, server_name: str, connection_cfg: dict, warn_on_failure: bool = True
+    ) -> bool:
+        retry_times, retry_delay, timeout = self._parse_connection_config(connection_cfg)
+        
+        last_error = None
+        for attempt in range(retry_times):
+            try:
+                session_cm = self._client.session(server_name)
+                session = await session_cm.__aenter__()
+                await session.initialize()
+                
+                self._session_cms[server_name] = session_cm
+                self._sessions[server_name] = session
+                
+                server_tools = await asyncio.wait_for(
+                    load_mcp_tools(session),
+                    timeout=timeout
+                )
+                self._tools.extend(server_tools)
+                
+                if server_name == "playwright":
+                    self._browser_alive = True
+                
+                return True
+            except asyncio.TimeoutError:
+                last_error = f"MCP连接超时（{timeout}秒）"
+                await self._cleanup_server_session(server_name)
+            except Exception as e:
+                last_error = f"MCP连接失败：{str(e)}"
+                await self._cleanup_server_session(server_name)
+            
+            if attempt < retry_times - 1:
+                await asyncio.sleep(retry_delay)
+        
+        if last_error and warn_on_failure:
+            print(f"警告: 服务器 {server_name} 连接失败: {last_error}")
+        
+        return False
     
     async def connect(self) -> None:
         """连接到所有配置的MCP服务器（带重试机制）"""
@@ -76,42 +127,7 @@ class MCPManager:
         self._client = MultiServerMCPClient(connections)
         
         for server_name, connection_cfg in server_configs.items():
-            retry_times = connection_cfg.get("retry_times", 3)
-            retry_delay = connection_cfg.get("retry_delay", 5)
-            timeout = connection_cfg.get("timeout", 30)
-            
-            last_error = None
-            for attempt in range(retry_times):
-                try:
-                    session_cm = self._client.session(server_name)
-                    session = await session_cm.__aenter__()
-                    await session.initialize()
-                    
-                    self._session_cms[server_name] = session_cm
-                    self._sessions[server_name] = session
-                    
-                    server_tools = await asyncio.wait_for(
-                        load_mcp_tools(session),
-                        timeout=timeout
-                    )
-                    self._tools.extend(server_tools)
-                    
-                    if server_name == "playwright":
-                        self._browser_alive = True
-                    
-                    break
-                except asyncio.TimeoutError:
-                    last_error = f"MCP连接超时（{timeout}秒）"
-                    await self._cleanup_server_session(server_name)
-                except Exception as e:
-                    last_error = f"MCP连接失败：{str(e)}"
-                    await self._cleanup_server_session(server_name)
-                
-                if attempt < retry_times - 1:
-                    await asyncio.sleep(retry_delay)
-            
-            if last_error and server_name not in self._sessions:
-                print(f"警告: 服务器 {server_name} 连接失败: {last_error}")
+            await self._connect_single_server(server_name, connection_cfg)
         
         if self._sessions:
             self._connected = True
@@ -123,7 +139,7 @@ class MCPManager:
         if server_name in self._session_cms:
             try:
                 await self._session_cms[server_name].__aexit__(None, None, None)
-            except:
+            except Exception:
                 pass
         self._session_cms.pop(server_name, None)
         self._sessions.pop(server_name, None)
@@ -184,33 +200,11 @@ class MCPManager:
         
         try:
             connection_cfg = playwright_config.get("connection", {})
-            retry_times = connection_cfg.get("retry_times", 3)
-            retry_delay = connection_cfg.get("retry_delay", 5)
-            timeout = connection_cfg.get("timeout", 30)
-            
-            for attempt in range(retry_times):
-                try:
-                    session_cm = self._client.session("playwright")
-                    session = await session_cm.__aenter__()
-                    await session.initialize()
-                    
-                    self._session_cms["playwright"] = session_cm
-                    self._sessions["playwright"] = session
-                    
-                    server_tools = await asyncio.wait_for(
-                        load_mcp_tools(session),
-                        timeout=timeout
-                    )
-                    self._tools.extend(server_tools)
-                    self._browser_alive = True
-                    self._connected = bool(self._sessions)
-                    return True
-                except Exception:
-                    await self._cleanup_server_session("playwright")
-                    if attempt < retry_times - 1:
-                        await asyncio.sleep(retry_delay)
-            
-            return False
+            success = await self._connect_single_server(
+                "playwright", connection_cfg, warn_on_failure=False
+            )
+            self._connected = bool(self._sessions)
+            return success
         except Exception as e:
             print(f"\n[系统] 浏览器重新初始化失败: {e}")
             return False

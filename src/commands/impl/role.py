@@ -123,7 +123,7 @@ class RoleCommand(BaseCommand):
             
             role = context.role_manager.switch_role(name)
             
-            context.agent.context_manager.clear()
+            context.agent.clear_context()
             
             role_skills = None
             if role.tools and role.tools.skills:
@@ -137,22 +137,41 @@ class RoleCommand(BaseCommand):
             context.agent.role_config = role
             context.agent.reload_tools(new_tool_registry)
             
-            await context.agent.load_role_skills(role_skills)
-            
             merged_model = context.role_manager.get_merged_model_config(name)
             if merged_model:
-                context.agent.llm = context.agent._create_llm()
+                context.agent.llm = context.agent._create_llm(merged_model)
             
-            tools_info = self._get_tools_summary(new_tool_registry)
+            await context.agent.load_role_skills(role_skills)
+            
+            tools_info = self._get_tools_summary(new_tool_registry, context.agent.tools)
             
             skills_info = ""
             if role_skills:
                 skills_info = f"\nSkills: {', '.join(role_skills)}"
             
+            skills_data = []
+            if role_skills:
+                for skill_name in role_skills:
+                    metadata = context.skill_loader.registry.get_skill(skill_name)
+                    if metadata:
+                        skills_data.append({
+                            "name": metadata.name,
+                            "description": metadata.description,
+                            "version": metadata.version,
+                            "triggers": list(metadata.triggers) if metadata.triggers else []
+                        })
+                    else:
+                        skills_data.append({
+                            "name": skill_name,
+                            "description": "Skill元数据未找到",
+                            "version": "",
+                            "triggers": []
+                        })
+            
             return CommandResult(
                 type=ResultType.SUCCESS,
                 message=f"已切换到角色 '{name}'：{role.description}\n上下文已清空，新对话已开始。\n{tools_info}{skills_info}",
-                data={"role": name, "description": role.description, "skills": role_skills}
+                data={"role": name, "description": role.description, "skills": skills_data}
             )
             
         except ConfigValidationError as e:
@@ -166,8 +185,8 @@ class RoleCommand(BaseCommand):
                 message=f"切换角色时发生错误：{str(e)}"
             )
     
-    def _get_tools_summary(self, tool_registry) -> str:
-        tools = tool_registry.get_all_tools()
+    def _get_tools_summary(self, tool_registry, agent_tools=None) -> str:
+        tools = agent_tools if agent_tools is not None else tool_registry.get_all_tools()
         if not tools:
             return "工具: 无"
         

@@ -32,7 +32,8 @@ def check_llm_wrapper():
         
         roboust_class = next(cls for cls in classes if cls.name == 'RobustChatOpenAI')
         
-        methods = [node.name for node in roboust_class.body if isinstance(node, ast.FunctionDef)]
+        methods = [node.name for node in roboust_class.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        async_methods = [node.name for node in roboust_class.body if isinstance(node, ast.AsyncFunctionDef)]
         
         required_methods = ['_generate', '_agenerate']
         for method in required_methods:
@@ -42,6 +43,8 @@ def check_llm_wrapper():
         
         print("✓ 找到 RobustChatOpenAI 类")
         print(f"✓ 包含必要的方法: {', '.join(required_methods)}")
+        if async_methods:
+            print(f"✓ 异步方法: {', '.join(async_methods)}")
         
         if "null value for 'choices'" in code:
             print("✓ 包含 null choices 错误处理逻辑")

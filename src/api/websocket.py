@@ -1,5 +1,5 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from typing import List
+from typing import List, Optional
 import json
 import asyncio
 
@@ -37,6 +37,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 _app_state = None
 _dispatcher: CommandDispatcher = None
+_current_task: Optional[asyncio.Task] = None
 
 
 def set_app_state(state):
@@ -102,6 +103,8 @@ async def handle_message(websocket: WebSocket, message: dict):
             })
         else:
             await handle_task(websocket, content)
+    elif msg_type == "stop":
+        await handle_stop(websocket)
     elif msg_type == "ping":
         await manager.send_message(websocket, {"type": "pong", "content": ""})
     else:
@@ -141,7 +144,26 @@ async def handle_command(websocket: WebSocket, command: str):
         })
 
 
+async def handle_stop(websocket: WebSocket):
+    global _current_task
+    state = get_app_state()
+    if state and hasattr(state, 'agent') and state.agent:
+        state.agent.interrupt("用户中断")
+    if _current_task and not _current_task.done():
+        _current_task.cancel()
+        try:
+            await _current_task
+        except asyncio.CancelledError:
+            pass
+    _current_task = None
+    await manager.send_message(websocket, {
+        "type": "interrupted",
+        "content": "任务已中断"
+    })
+
+
 async def handle_task(websocket: WebSocket, task_content: str):
+    global _current_task
     state = get_app_state()
     
     if not state:
@@ -158,23 +180,34 @@ async def handle_task(websocket: WebSocket, task_content: str):
         })
         return
     
-    try:
-        full_response = ""
-        
-        async for chunk in state.agent.run_stream(task_content):
-            if chunk:
-                full_response += chunk
-                await manager.send_message(websocket, {
-                    "type": "chunk",
-                    "content": chunk
-                })
-        
-        await manager.send_message(websocket, {
-            "type": "done",
-            "content": full_response
-        })
-    except Exception as e:
-        await manager.send_message(websocket, {
-            "type": "error",
-            "content": f"执行错误: {str(e)}"
-        })
+    async def run_task():
+        try:
+            full_response = ""
+            
+            async for chunk in state.agent.run_stream(task_content):
+                if chunk:
+                    full_response += chunk
+                    await manager.send_message(websocket, {
+                        "type": "chunk",
+                        "content": chunk
+                    })
+            
+            await manager.send_message(websocket, {
+                "type": "done",
+                "content": full_response
+            })
+        except asyncio.CancelledError:
+            await manager.send_message(websocket, {
+                "type": "interrupted",
+                "content": "任务已中断"
+            })
+        except Exception as e:
+            await manager.send_message(websocket, {
+                "type": "error",
+                "content": f"执行错误: {str(e)}"
+            })
+        finally:
+            global _current_task
+            _current_task = None
+    
+    _current_task = asyncio.create_task(run_task())

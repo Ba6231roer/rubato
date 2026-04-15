@@ -6,16 +6,22 @@ model:
 execution:
   max_context_tokens: 80000
   timeout: 600
-  recursion_limit: 100
-  sub_agent_recursion_limit: 50
-  max_parallel_instances: 3
-available_tools:
-  - shell_tool
-  - spawn_agent
-  - browser_navigate
-  - browser_click
-  - browser_type
-  - browser_snapshot
+  recursion_limit: 1000
+  sub_agent_recursion_limit: 500
+tools:
+  builtin:
+    spawn_agent: true
+    shell_tool: true
+    file_tools:
+      enabled: true
+      permissions:
+        "read:*": "allow"
+        "write:*.md": "allow"
+        "write:*.txt": "allow"
+  mcp:
+    enabled: false
+  skills:
+    - playwright-cli
 metadata:
   version: "1.0"
   author: "Rubato Team"

@@ -135,6 +135,13 @@ class TestCaseManager {
     
     handleWSMessage(data) {
         switch (data.type) {
+            case 'command_result':
+                if (this.chatPanel.isCommandMode) {
+                    const result = data.content;
+                    const message = result.message || '';
+                    this.chatPanel.addCommandResult(message, false);
+                }
+                break;
             case 'chunk':
                 this.chatPanel.appendAIMessage(data.content);
                 break;
@@ -143,6 +150,9 @@ class TestCaseManager {
                 break;
             case 'error':
                 this.chatPanel.showErrorMessage(data.content);
+                this.chatPanel.finishAIMessage();
+                break;
+            case 'interrupted':
                 this.chatPanel.finishAIMessage();
                 break;
         }

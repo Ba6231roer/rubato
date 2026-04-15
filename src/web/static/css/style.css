@@ -217,6 +217,15 @@ body {
     cursor: not-allowed;
 }
 
+.btn-danger {
+    background-color: var(--error-color);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c82333;
+}
+
 .btn-secondary {
     background-color: var(--secondary-color);
     color: white;
@@ -1133,6 +1142,7 @@ body {
 }
 
 .result-list {
+    white-space: normal;
     padding: 8px 0;
 }
 
@@ -1179,4 +1189,26 @@ body {
     color: var(--text-muted);
     display: block;
     margin-top: 4px;
+}
+
+.result-list .role-switch-msg {
+    margin-bottom: 12px;
+    line-height: 1.6;
+}
+
+.result-list p {
+    font-size: 0.875rem;
+    margin: 4px 0;
+}
+
+.result-list pre {
+    background: var(--content-bg);
+    padding: 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
 }

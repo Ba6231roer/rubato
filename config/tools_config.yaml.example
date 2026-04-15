@@ -5,174 +5,176 @@
 # 复制此文件为 tools_config.yaml 并根据需要修改
 # ============================================================
 
-# ============================================================
-# 内置工具配置
-# ============================================================
-builtin:
-  # 是否启用内置工具
-  # 内置工具包括：spawn_agent、shell_tool、file_tools
-  enabled: true
-
-  # spawn_agent 工具配置
-  # 用于创建子代理执行特定任务
-  spawn_agent:
-    # 是否启用 spawn_agent 工具
+tools:
+  # ============================================================
+  # 内置工具配置
+  # ============================================================
+  builtin:
+    # 是否启用内置工具
+    # 内置工具包括：spawn_agent、shell_tool、file_tools
     enabled: true
 
-  # Shell 工具配置
-  # 用于执行系统命令
-  shell_tool:
-    # 是否启用 Shell 工具
-    enabled: true
-    # 安全模式：启用后将限制危险命令的执行
-    safe_mode: true
-    # 允许执行的命令白名单
-    # 留空表示在安全模式下允许所有非危险命令
-    # 指定后将只允许执行白名单中的命令
-    allowed_commands: []
-    # allowed_commands 示例：
-    # allowed_commands:
-    #   - git
-    #   - npm
-    #   - python
-    #   - pip
+    # spawn_agent 工具配置
+    # 用于创建子代理执行特定任务
+    spawn_agent:
+      # 是否启用 spawn_agent 工具
+      enabled: true
 
-  # 文件工具配置
-  # 用于文件读写、搜索等操作
-  file_tools:
-    # 是否启用文件工具
-    enabled: true
-    # 默认权限模式
+    # Shell 工具配置
+    # 用于执行系统命令
+    shell_tool:
+      # 是否启用 Shell 工具
+      enabled: true
+      # 安全模式：启用后将限制危险命令的执行
+      safe_mode: true
+      # 允许执行的命令白名单
+      # 留空表示在安全模式下允许所有非危险命令
+      # 指定后将只允许执行白名单中的命令
+      allowed_commands: []
+      # allowed_commands 示例：
+      # allowed_commands:
+      #   - git
+      #   - npm
+      #   - python
+      #   - pip
+
+    # 文件工具配置
+    # 用于文件读写、搜索等操作
+    file_tools:
+      # 是否启用文件工具
+      enabled: true
+      # 默认权限模式
+      # 可选值：
+      #   - ask: 每次操作前询问用户确认
+      #   - allow: 自动允许所有操作
+      #   - deny: 自动拒绝所有操作
+      permission_mode: ask
+      # 工作区配置（可选）
+      # workspace:
+      #   # 主工作区路径（必填）
+      #   main: /path/to/workspace
+      #   # 额外的工作区路径列表
+      #   additional:
+      #     - /path/to/extra/workspace1
+      #     - /path/to/extra/workspace2
+      #   # 排除的路径模式（支持 glob 模式）
+      #   excluded:
+      #     - "**/node_modules/**"
+      #     - "**/.git/**"
+      #     - "**/__pycache__/**"
+      workspace: null
+      # 路径权限配置
+      # 可为不同路径设置不同的权限模式
+      # 路径支持 glob 模式匹配
+      permissions: {}
+      # permissions 示例：
+      # permissions:
+      #   # 允许读取 src 目录
+      #   "src/**": allow
+      #   # 拒绝访问敏感配置文件
+      #   "**/.env": deny
+      #   # 询问确认后修改配置文件
+      #   "config/**/*.yaml": ask
+      #   # 允许操作日志目录
+      #   "logs/**": allow
+      # 是否启用审计日志
+      # 启用后将记录所有文件操作到日志
+      audit: true
+
+  # ============================================================
+  # MCP (Model Context Protocol) 工具配置
+  # ============================================================
+  mcp:
+    # MCP 服务器配置文件路径
+    # 该文件定义了可用的 MCP 服务器
+    config_file: mcp_config.yaml
+    # 是否自动连接 MCP 服务器
+    # 启用后将在启动时自动连接配置的服务器
+    auto_connect: true
+    # 工具列表缓存时间（秒）
+    # 缓存期间不会重新获取工具列表
+    cache_ttl: 300
+
+  # ============================================================
+  # Skills 技能配置
+  # ============================================================
+  skills:
+    # 技能配置文件路径
+    # 该文件定义了可用的技能
+    config_file: skills_config.yaml
+    # 是否自动加载技能元数据
+    # 启用后将在启动时自动加载所有技能的元数据
+    auto_load_metadata: true
+
+  # ============================================================
+  # 工具说明文档配置
+  # ============================================================
+  tool_docs:
+    # 是否自动注入工具说明文档
+    # 启用后将在系统提示中自动添加工具使用说明
+    auto_inject: true
+    # 文档注入位置
     # 可选值：
-    #   - ask: 每次操作前询问用户确认
-    #   - allow: 自动允许所有操作
-    #   - deny: 自动拒绝所有操作
-    permission_mode: ask
-    # 工作区配置（可选）
-    # workspace:
-    #   # 主工作区路径（必填）
-    #   main: /path/to/workspace
-    #   # 额外的工作区路径列表
-    #   additional:
-    #     - /path/to/extra/workspace1
-    #     - /path/to/extra/workspace2
-    #   # 排除的路径模式（支持 glob 模式）
-    #   excluded:
-    #     - "**/node_modules/**"
-    #     - "**/.git/**"
-    #     - "**/__pycache__/**"
-    workspace: null
-    # 路径权限配置
-    # 可为不同路径设置不同的权限模式
-    # 路径支持 glob 模式匹配
-    permissions: {}
-    # permissions 示例：
-    # permissions:
-    #   # 允许读取 src 目录
-    #   "src/**": allow
-    #   # 拒绝访问敏感配置文件
-    #   "**/.env": deny
-    #   # 询问确认后修改配置文件
-    #   "config/**/*.yaml": ask
-    #   # 允许操作日志目录
-    #   "logs/**": allow
-    # 是否启用审计日志
-    # 启用后将记录所有文件操作到日志
-    audit: true
-
-# ============================================================
-# MCP (Model Context Protocol) 工具配置
-# ============================================================
-mcp:
-  # MCP 服务器配置文件路径
-  # 该文件定义了可用的 MCP 服务器
-  config_file: mcp_config.yaml
-  # 是否自动连接 MCP 服务器
-  # 启用后将在启动时自动连接配置的服务器
-  auto_connect: true
-  # 工具列表缓存时间（秒）
-  # 缓存期间不会重新获取工具列表
-  cache_ttl: 300
-
-# ============================================================
-# Skills 技能配置
-# ============================================================
-skills:
-  # 技能配置文件路径
-  # 该文件定义了可用的技能
-  config_file: skills_config.yaml
-  # 是否自动加载技能元数据
-  # 启用后将在启动时自动加载所有技能的元数据
-  auto_load_metadata: true
-
-# ============================================================
-# 工具说明文档配置
-# ============================================================
-tool_docs:
-  # 是否自动注入工具说明文档
-  # 启用后将在系统提示中自动添加工具使用说明
-  auto_inject: true
-  # 文档注入位置
-  # 可选值：
-  #   - after_prompt: 在系统提示之后注入
-  #   - before_prompt: 在系统提示之前注入
-  inject_position: after_prompt
-  # 文档格式
-  # 可选值：
-  #   - markdown: Markdown 格式
-  #   - plain: 纯文本格式
-  format: markdown
-  # 是否在文档中包含使用示例
-  include_examples: true
+    #   - after_prompt: 在系统提示之后注入
+    #   - before_prompt: 在系统提示之前注入
+    inject_position: after_prompt
+    # 文档格式
+    # 可选值：
+    #   - markdown: Markdown 格式
+    #   - plain: 纯文本格式
+    format: markdown
+    # 是否在文档中包含使用示例
+    include_examples: true
 
 # ============================================================
 # 完整配置示例（取消注释以使用）
 # ============================================================
-# builtin:
-#   enabled: true
-#   spawn_agent:
+# tools:
+#   builtin:
 #     enabled: true
-#   shell_tool:
-#     enabled: true
-#     safe_mode: true
-#     allowed_commands:
-#       - git
-#       - npm
-#       - node
-#       - python
-#       - pip
-#   file_tools:
-#     enabled: true
-#     permission_mode: ask
-#     workspace:
-#       main: /home/user/projects/myproject
-#       additional:
-#         - /home/user/shared
-#       excluded:
-#         - "**/node_modules/**"
-#         - "**/.git/**"
-#         - "**/dist/**"
-#         - "**/build/**"
-#     permissions:
-#       "src/**": allow
-#       "tests/**": allow
-#       "docs/**": allow
-#       "**/.env": deny
-#       "**/secrets/**": deny
-#       "config/**/*.yaml": ask
-#     audit: true
-# 
-# mcp:
-#   config_file: mcp_config.yaml
-#   auto_connect: true
-#   cache_ttl: 300
-# 
-# skills:
-#   config_file: skills_config.yaml
-#   auto_load_metadata: true
-# 
-# tool_docs:
-#   auto_inject: true
-#   inject_position: after_prompt
-#   format: markdown
-#   include_examples: true
+#     spawn_agent:
+#       enabled: true
+#     shell_tool:
+#       enabled: true
+#       safe_mode: true
+#       allowed_commands:
+#         - git
+#         - npm
+#         - node
+#         - python
+#         - pip
+#     file_tools:
+#       enabled: true
+#       permission_mode: ask
+#       workspace:
+#         main: /home/user/projects/myproject
+#         additional:
+#           - /home/user/shared
+#         excluded:
+#           - "**/node_modules/**"
+#           - "**/.git/**"
+#           - "**/dist/**"
+#           - "**/build/**"
+#       permissions:
+#         "src/**": allow
+#         "tests/**": allow
+#         "docs/**": allow
+#         "**/.env": deny
+#         "**/secrets/**": deny
+#         "config/**/*.yaml": ask
+#       audit: true
+#   
+#   mcp:
+#     config_file: mcp_config.yaml
+#     auto_connect: true
+#     cache_ttl: 300
+#   
+#   skills:
+#     config_file: skills_config.yaml
+#     auto_load_metadata: true
+#   
+#   tool_docs:
+#     auto_inject: true
+#     inject_position: after_prompt
+#     format: markdown
+#     include_examples: true

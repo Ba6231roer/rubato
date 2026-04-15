@@ -1,16 +1,13 @@
 name: test-case-executor
 description: 测试案例执行者 - 负责执行自动化测试任务
 system_prompt_file: prompts/roles/test_case_executor.txt
-
 model:
   inherit: true
-
 execution:
   max_context_tokens: 80000
   timeout: 300
-  recursion_limit: 100
-  sub_agent_recursion_limit: 50
-
+  recursion_limit: 1000
+  sub_agent_recursion_limit: 500
 tools:
   builtin:
     spawn_agent: true
@@ -21,9 +18,10 @@ tools:
         "read:*": "allow"
         "write:*.md": "allow"
         "write:*.txt": "allow"
+  mcp:
+    enabled: false
   skills:
     - playwright-cli
-
 metadata:
   version: "1.0"
   author: "Rubato Team"
