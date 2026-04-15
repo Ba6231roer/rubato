@@ -1,9 +1,9 @@
 agent:
-  max_context_tokens: 80000
+  max_context_tokens: 200000
   
   message_compression:
     enabled: true
-    max_tokens: 50000
+    max_tokens: 120000
     keep_recent: 6
     summary_max_length: 300
     history_summary_count: 10
@@ -14,6 +14,7 @@ agent:
     tool_result_persist_threshold: 50000
     tool_result_budget_per_message: 200000
     max_consecutive_failures: 3
+    skill_stale_timeout_seconds: 300
   
   execution:
     recursion_limit: 100
@@ -24,6 +25,7 @@ agent:
     log_token_estimation: true
     log_compression_stats: true
     log_step_details: true
+    log_skill_lifecycle: true
     log_format: detailed
     tool_log_mode: detailed
 

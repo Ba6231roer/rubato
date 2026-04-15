@@ -656,6 +656,87 @@ class TestSubAgentManager:
         assert "active_sessions" in stats
         assert "lifecycle_stats" in stats
     
+    def test_is_known_agent_predefined(self, sub_agent_manager):
+        """测试 _is_known_agent 匹配预定义 SubAgent"""
+        sub_agent_manager.agent_definitions["predefined-agent"] = SubAgentDefinition(
+            name="predefined-agent"
+        )
+        assert sub_agent_manager._is_known_agent("predefined-agent") is True
+    
+    def test_is_known_agent_role_config(self, sub_agent_manager, tmp_path):
+        """测试 _is_known_agent 匹配角色配置文件"""
+        sub_agent_manager.roles_dir = tmp_path
+        (tmp_path / "my-role.yaml").write_text("name: my-role", encoding="utf-8")
+        assert sub_agent_manager._is_known_agent("my-role") is True
+    
+    def test_is_known_agent_role_config_hyphen_underscore(self, sub_agent_manager, tmp_path):
+        """测试 _is_known_agent 角色名连字符/下划线变体匹配"""
+        sub_agent_manager.roles_dir = tmp_path
+        (tmp_path / "bs_ui_kb_curator.yaml").write_text("name: bs-ui-kb-curator", encoding="utf-8")
+        assert sub_agent_manager._is_known_agent("bs-ui-kb-curator") is True
+    
+    def test_is_known_agent_unknown(self, sub_agent_manager):
+        """测试 _is_known_agent 不匹配未知名称"""
+        assert sub_agent_manager._is_known_agent("unknown-agent-xyz") is False
+    
+    @pytest.mark.asyncio
+    async def test_spawn_agent_known_role_ignores_system_prompt(self, sub_agent_manager):
+        """测试已知角色名时忽略 LLM 传入的 system_prompt"""
+        sub_agent_manager.agent_definitions["known-role"] = SubAgentDefinition(
+            name="known-role",
+            system_prompt="Role config prompt"
+        )
+        
+        with patch.object(sub_agent_manager, '_create_sub_agent_by_role', new_callable=AsyncMock, return_value="role result") as mock_role, \
+             patch.object(sub_agent_manager, '_create_dynamic_sub_agent', new_callable=AsyncMock, return_value="dynamic result") as mock_dynamic:
+            
+            options = SubAgentSpawnOptions(
+                agent_name="known-role",
+                task="Test task",
+                system_prompt="LLM generated prompt"
+            )
+            
+            result = await sub_agent_manager.spawn_agent(options)
+            
+            assert result == "role result"
+            mock_role.assert_called_once()
+            mock_dynamic.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_spawn_agent_unknown_with_system_prompt_uses_dynamic(self, sub_agent_manager):
+        """测试未知角色名 + 有 system_prompt 时走动态创建"""
+        with patch.object(sub_agent_manager, '_create_sub_agent_by_role', new_callable=AsyncMock, return_value="role result") as mock_role, \
+             patch.object(sub_agent_manager, '_create_dynamic_sub_agent', new_callable=AsyncMock, return_value="dynamic result") as mock_dynamic:
+            
+            options = SubAgentSpawnOptions(
+                agent_name="custom-agent-xyz",
+                task="Test task",
+                system_prompt="Custom prompt"
+            )
+            
+            result = await sub_agent_manager.spawn_agent(options)
+            
+            assert result == "dynamic result"
+            mock_dynamic.assert_called_once()
+            mock_role.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_spawn_agent_unknown_without_system_prompt_uses_role(self, sub_agent_manager):
+        """测试未知角色名 + 无 system_prompt 时走角色路径（回退默认）"""
+        with patch.object(sub_agent_manager, '_create_sub_agent_by_role', new_callable=AsyncMock, return_value="role result") as mock_role, \
+             patch.object(sub_agent_manager, '_create_dynamic_sub_agent', new_callable=AsyncMock, return_value="dynamic result") as mock_dynamic:
+            
+            options = SubAgentSpawnOptions(
+                agent_name="custom-agent-xyz",
+                task="Test task"
+            )
+            
+            result = await sub_agent_manager.spawn_agent(options)
+            
+            assert result == "role result"
+            mock_role.assert_called_once()
+            mock_dynamic.assert_not_called()
+    
     @pytest.mark.asyncio
     async def test_spawn_agent_recursion_limit(self, sub_agent_manager):
         """测试递归深度限制"""

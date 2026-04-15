@@ -25,6 +25,8 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMe
 from langchain_core.tools import BaseTool
 
 from ..context.compressor import ContextCompressor
+from ..context.conversation_history import ConversationHistory, ConversationTurn, AssistantStep
+from ..context.system_prompt_registry import SystemPromptRegistry
 from ..context.tool_result_storage import ToolResultStorage, ContentReplacementState
 from ..skills.parser import SkillMetadata
 from ..utils.logger import get_llm_logger
@@ -202,6 +204,10 @@ class QueryEngineConfig:
     retry_max_count: int = 3
     retry_initial_delay: float = 10.0
     retry_max_delay: float = 60.0
+    system_prompt_registry: Optional[SystemPromptRegistry] = None
+    conversation_history: Optional[ConversationHistory] = None
+    skill_stale_timeout_seconds: int = 300
+    logging_config: Optional[Any] = None
 
 
 class QueryEngine:
@@ -250,6 +256,11 @@ class QueryEngine:
         self._tool_map: Dict[str, BaseTool] = {
             tool.name: tool for tool in config.tools
         }
+
+        self.system_prompt_registry = config.system_prompt_registry
+        self.conversation_history = config.conversation_history or ConversationHistory()
+        self.skill_stale_timeout_seconds = config.skill_stale_timeout_seconds
+        self.logging_config = config.logging_config
 
         self._compression_enabled = config.compression_enabled
         if self._compression_enabled:
@@ -305,6 +316,7 @@ class QueryEngine:
         
         try:
             self.mutable_messages.append(HumanMessage(content=prompt))
+            self.conversation_history.start_turn(HumanMessage(content=prompt))
             
             yield SDKMessage.assistant(
                 content="",
@@ -387,24 +399,30 @@ class QueryEngine:
             self._current_turn += 1
             self._reactive_compact_attempted = False
             
-            self.logger.log_agent_action("react_loop_start", {
-                "session_id": self._session_id,
-                "turn": self._current_turn,
-                "max_turns": self.config.max_turns,
-                "message_count": len(self.mutable_messages)
-            })
+            should_log_steps = (
+                self.logging_config is None
+                or getattr(self.logging_config, "log_step_details", True)
+            )
+            if should_log_steps:
+                self.logger.log_agent_action("react_loop_start", {
+                    "session_id": self._session_id,
+                    "turn": self._current_turn,
+                    "max_turns": self.config.max_turns,
+                    "message_count": len(self.mutable_messages)
+                })
 
             await self._run_compression_pipeline()
 
             if self._compressor is not None:
                 estimated_tokens = self._compressor.estimate_tokens(self.mutable_messages)
                 warning_state = self._compressor.calculate_token_warning_state(estimated_tokens)
-                self.logger.log_agent_action("token_estimation", {
-                    "session_id": self._session_id,
-                    "turn": self._current_turn,
-                    "estimated_tokens": estimated_tokens,
-                    "warning_state": warning_state,
-                })
+                if should_log_steps:
+                    self.logger.log_agent_action("token_estimation", {
+                        "session_id": self._session_id,
+                        "turn": self._current_turn,
+                        "estimated_tokens": estimated_tokens,
+                        "warning_state": warning_state,
+                    })
 
             if self._check_blocking_limit():
                 force_success = await self._force_compact()
@@ -479,18 +497,20 @@ class QueryEngine:
                 break
             
             self.mutable_messages.append(llm_response)
+            self.conversation_history.append_assistant_step(llm_response, tool_results=[])
             
             self._update_usage_from_response(llm_response)
             
             if not hasattr(llm_response, 'tool_calls') or not llm_response.tool_calls:
                 no_tool_turn_count += 1
                 
-                self.logger.log_agent_action("no_tool_call", {
-                    "session_id": self._session_id,
-                    "turn": self._current_turn,
-                    "no_tool_turn_count": no_tool_turn_count,
-                    "content_preview": llm_response.content[:200] if llm_response.content else ""
-                })
+                if should_log_steps:
+                    self.logger.log_agent_action("no_tool_call", {
+                        "session_id": self._session_id,
+                        "turn": self._current_turn,
+                        "no_tool_turn_count": no_tool_turn_count,
+                        "content_preview": llm_response.content[:200] if llm_response.content else ""
+                    })
                 
                 content_str = str(llm_response.content) if llm_response.content else ""
                 completion_indicators = [
@@ -529,11 +549,12 @@ class QueryEngine:
                         }
                     )
                     
-                    self.logger.log_agent_action("guidance_added", {
-                        "session_id": self._session_id,
-                        "turn": self._current_turn,
-                        "available_tools": tool_names[:5]
-                    })
+                    if should_log_steps:
+                        self.logger.log_agent_action("guidance_added", {
+                            "session_id": self._session_id,
+                            "turn": self._current_turn,
+                            "available_tools": tool_names[:5]
+                        })
                     continue
             
             no_tool_turn_count = 0
@@ -641,6 +662,8 @@ class QueryEngine:
                 }
             )
         
+        self.conversation_history.finish_turn()
+        
         if self._current_turn >= (self.config.max_turns or 100):
             yield SDKMessage.error(
                 message=f"达到最大轮次限制: {self.config.max_turns}",
@@ -680,6 +703,9 @@ class QueryEngine:
         if not self._compression_enabled or self._compressor is None:
             return
 
+        if self.system_prompt_registry is not None:
+            self.system_prompt_registry.remove_stale_skills(self.skill_stale_timeout_seconds)
+
         messages = self._compressor.get_messages_after_compact_boundary(self.mutable_messages)
         messages, _ = self._compressor.apply_tool_result_budget(messages)
         messages, snip_tokens_freed = self._compressor.snip_compact(messages)
@@ -690,11 +716,16 @@ class QueryEngine:
         if len(messages) < original_len:
             self.mutable_messages = messages
             self._restore_post_compact_context()
-            self.logger.log_agent_action("compression_pipeline_completed", {
-                "session_id": self._session_id,
-                "original_message_count": original_len,
-                "compressed_message_count": len(self.mutable_messages),
-            })
+            should_log = (
+                self.logging_config is None
+                or getattr(self.logging_config, "log_compression_stats", True)
+            )
+            if should_log:
+                self.logger.log_agent_action("compression_pipeline_completed", {
+                    "session_id": self._session_id,
+                    "original_message_count": original_len,
+                    "compressed_message_count": len(self.mutable_messages),
+                })
         elif messages is not self.mutable_messages:
             self.mutable_messages = messages
 
@@ -914,6 +945,9 @@ class QueryEngine:
             yield chunk
     
     async def _prepare_messages_for_llm(self) -> List[BaseMessage]:
+        if self.system_prompt_registry is not None:
+            self.llm_caller.system_prompt = self.system_prompt_registry.build()
+            return [msg for msg in self.mutable_messages if not isinstance(msg, SystemMessage)]
         return list(self.mutable_messages)
     
     def _preprocess_tool_args(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:

@@ -10,6 +10,7 @@ from ..mcp.tools import ToolRegistry
 from ..skills.loader import SkillLoader
 from ..skills.manager import SkillManager
 from ..context.manager import ContextManager
+from ..context.system_prompt_registry import SystemPromptRegistry
 from .sub_agents import SubAgentManager, create_spawn_agent_tool
 from ..utils.logger import get_llm_logger
 from ..tools.docs import generate_tool_docs_for_prompt
@@ -50,7 +51,11 @@ class RubatoAgent:
         if role_config and role_config.tools and role_config.tools.skills:
             self._role_skills = role_config.tools.skills
         
-        self._current_system_prompt = self._build_system_prompt_with_skills(self._load_system_prompt())
+        self._system_prompt_registry = self._build_system_prompt_registry()
+        self._current_system_prompt = self._system_prompt_registry.build()
+        
+        self.llm.system_prompt_registry = self._system_prompt_registry
+        self.llm.logging_config = self.logging_config
         
         self.max_context_tokens = (
             role_config.execution.max_context_tokens
@@ -147,6 +152,8 @@ class RubatoAgent:
             retry_max_count=self.config.model.parameters.retry_max_count,
             retry_initial_delay=self.config.model.parameters.retry_initial_delay,
             retry_max_delay=self.config.model.parameters.retry_max_delay,
+            system_prompt_registry=self._system_prompt_registry,
+            logging_config=self.logging_config,
         )
         
         return QueryEngine(query_config)
@@ -156,6 +163,7 @@ class RubatoAgent:
         if self._query_engine is not None:
             old_messages = self._query_engine.get_messages()
         
+        self._current_system_prompt = self._system_prompt_registry.build()
         self._query_engine = self._create_query_engine()
         
         if old_messages:
@@ -173,6 +181,8 @@ class RubatoAgent:
             temperature=config.temperature,
             max_tokens=config.max_tokens,
             default_headers={"Authorization": config.auth} if config.auth else None,
+            system_prompt_registry=getattr(self, '_system_prompt_registry', None),
+            logging_config=getattr(self, 'logging_config', None),
         )
     
     def _get_tools_for_role(self) -> List[BaseTool]:
@@ -319,6 +329,29 @@ class RubatoAgent:
         
         return base_prompt
     
+    def _build_system_prompt_registry(self) -> SystemPromptRegistry:
+        registry = SystemPromptRegistry(logger=self.logger)
+        
+        base_prompt = self._load_system_prompt()
+        registry.add_static("base_prompt", base_prompt)
+        
+        if self._role_skills and self.skill_loader:
+            for skill_name in self._role_skills:
+                content = self.skill_loader.get_skill_content_sync(skill_name)
+                if content and isinstance(content, str):
+                    registry.add_skill(skill_name, content)
+                    self.context_manager.mark_skill_loaded(skill_name)
+                    self.logger.log_agent_action("skill_full_loaded", {
+                        "skill": skill_name,
+                        "content_length": len(content)
+                    })
+                else:
+                    self.logger.log_agent_action("skill_content_unavailable", {
+                        "skill": skill_name
+                    })
+        
+        return registry
+    
     def _get_default_system_prompt(self) -> str:
         return """你是Rubato，一个专业的自动化测试执行助手。
 
@@ -394,8 +427,9 @@ class RubatoAgent:
         
         if skill_name and not self.context_manager.is_skill_loaded(skill_name):
             self.logger.log_agent_action("loading_skill", {"skill": skill_name})
-            enhanced_prompt = await self._inject_skill(skill_name)
-            self._current_system_prompt = enhanced_prompt
+            skill_content = await self.skill_loader.load_full_skill(skill_name)
+            self._system_prompt_registry.add_skill(skill_name, skill_content)
+            self._current_system_prompt = self._system_prompt_registry.build()
             self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
         elif self._query_engine is None:
@@ -489,8 +523,9 @@ class RubatoAgent:
         
         if skill_name and not self.context_manager.is_skill_loaded(skill_name):
             self.logger.log_agent_action("loading_skill", {"skill": skill_name})
-            enhanced_prompt = await self._inject_skill(skill_name)
-            self._current_system_prompt = enhanced_prompt
+            skill_content = await self.skill_loader.load_full_skill(skill_name)
+            self._system_prompt_registry.add_skill(skill_name, skill_content)
+            self._current_system_prompt = self._system_prompt_registry.build()
             self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
         elif self._query_engine is None:
@@ -572,7 +607,9 @@ class RubatoAgent:
     async def _inject_skill(self, skill_name: str) -> str:
         skill_content = await self.skill_loader.load_full_skill(skill_name)
         
-        return f"{self._current_system_prompt}\n\n# 当前加载的Skill\n\n## {skill_name}\n\n{skill_content}\n\n---\n请根据这个Skill的指导，处理用户的请求。"
+        self._system_prompt_registry.add_skill(skill_name, skill_content)
+        self._current_system_prompt = self._system_prompt_registry.build()
+        return self._current_system_prompt
     
     def get_system_prompt(self) -> str:
         return self._current_system_prompt
@@ -643,7 +680,8 @@ class RubatoAgent:
             
             config_changes = self._reload_execution_config()
         
-        self._current_system_prompt = self._build_system_prompt_with_skills(self._load_system_prompt())
+        self._system_prompt_registry = self._build_system_prompt_registry()
+        self._current_system_prompt = self._system_prompt_registry.build()
         self._rebuild_query_engine()
         
         log_data = {
@@ -670,7 +708,8 @@ class RubatoAgent:
     
     def update_role_skills(self, skills: Optional[List[str]]) -> None:
         self._role_skills = skills
-        self._current_system_prompt = self._build_system_prompt_with_skills(self._load_system_prompt())
+        self._system_prompt_registry = self._build_system_prompt_registry()
+        self._current_system_prompt = self._system_prompt_registry.build()
         self._rebuild_query_engine()
         
         self.logger.log_agent_action("role_skills_updated", {
@@ -680,7 +719,8 @@ class RubatoAgent:
     
     async def load_role_skills(self, skills: Optional[List[str]]) -> None:
         self._role_skills = skills
-        self._current_system_prompt = self._build_system_prompt_with_skills(self._load_system_prompt())
+        self._system_prompt_registry = self._build_system_prompt_registry()
+        self._current_system_prompt = self._system_prompt_registry.build()
         self._rebuild_query_engine()
         
         self.logger.log_agent_action("role_skills_loaded", {

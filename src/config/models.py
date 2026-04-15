@@ -354,12 +354,13 @@ class MessageCompressionConfig(BaseModel):
     tool_result_persist_threshold: int = 50000
     tool_result_budget_per_message: int = 200000
     max_consecutive_failures: int = 3
+    skill_stale_timeout_seconds: int = 300
 
     @field_validator('max_tokens', 'keep_recent', 'summary_max_length', 'history_summary_count',
                      'autocompact_buffer_tokens', 'manual_compact_buffer_tokens',
                      'warning_threshold_buffer_tokens', 'snip_keep_recent',
                      'tool_result_persist_threshold', 'tool_result_budget_per_message',
-                     'max_consecutive_failures')
+                     'max_consecutive_failures', 'skill_stale_timeout_seconds')
     @classmethod
     def validate_positive(cls, v):
         return _validate_positive(v)
@@ -369,6 +370,7 @@ class AgentLoggingConfig(BaseModel):
     log_token_estimation: bool = True
     log_compression_stats: bool = True
     log_step_details: bool = True
+    log_skill_lifecycle: bool = True
     log_format: str = "compact"
     tool_log_mode: str = "summary"
 

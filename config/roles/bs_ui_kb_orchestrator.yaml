@@ -1,11 +1,11 @@
-name: test-suite-executor
-description: 测试案例集执行者 - 负责批量执行测试案例集
-system_prompt_file: prompts/roles/test_suite_executor.txt
+name: bs-ui-kb-orchestrator
+description: 系统知识库orchestrator - 负责分析并编排系统知识库任务
+system_prompt_file: prompts/roles/bs_ui_kb_orchestrator.txt
 model:
   inherit: true
 execution:
-  max_context_tokens: 200000
-  timeout: 600
+  max_context_tokens: 80000
+  timeout: 300
   recursion_limit: 1000
   sub_agent_recursion_limit: 500
 tools:

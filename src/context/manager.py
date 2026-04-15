@@ -4,18 +4,24 @@ from typing import List, Optional
 class ContextManager:
     """上下文管理器 - 管理技能状态和应用状态"""
 
-    def __init__(self):
+    def __init__(self, system_prompt_registry=None):
         self._loaded_skills: List[str] = []
         self._app_state: dict = {}
+        self.system_prompt_registry = system_prompt_registry
 
     def clear(self) -> None:
         """清空技能加载状态"""
         self._loaded_skills = []
 
+    def set_registry(self, registry) -> None:
+        self.system_prompt_registry = registry
+
     def mark_skill_loaded(self, skill_name: str) -> None:
         """标记Skill已加载"""
         if skill_name not in self._loaded_skills:
             self._loaded_skills.append(skill_name)
+        if self.system_prompt_registry and self.system_prompt_registry.has_skill(skill_name):
+            self.system_prompt_registry.mark_skill_referenced(skill_name)
 
     def get_loaded_skills(self) -> List[str]:
         """获取已加载的Skills"""
@@ -23,7 +29,11 @@ class ContextManager:
 
     def is_skill_loaded(self, skill_name: str) -> bool:
         """检查Skill是否已加载"""
-        return skill_name in self._loaded_skills
+        if skill_name in self._loaded_skills:
+            return True
+        if self.system_prompt_registry and self.system_prompt_registry.has_skill(skill_name):
+            return True
+        return False
 
     def get_context(self) -> dict:
         """获取应用状态字典"""

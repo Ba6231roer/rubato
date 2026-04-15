@@ -66,13 +66,17 @@ class LLMCaller:
         max_context_tokens: Optional[int] = None,
         retry_max_count: int = 3,
         retry_initial_delay: float = 10.0,
-        retry_max_delay: float = 60.0
+        retry_max_delay: float = 60.0,
+        system_prompt_registry=None,
+        logging_config=None
     ):
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.tools = tools or []
         self.system_prompt = system_prompt
+        self.system_prompt_registry = system_prompt_registry
+        self.logging_config = logging_config
         self.usage_stats = UsageStats()
         self._tool_schemas: Optional[List[Dict[str, Any]]] = None
         self.logger = logger
@@ -559,7 +563,9 @@ class LLMCaller:
     ) -> List[BaseMessage]:
         full_messages = []
         
-        if self.system_prompt:
+        if self.system_prompt_registry:
+            full_messages.append(SystemMessage(content=self.system_prompt_registry.build()))
+        elif self.system_prompt:
             full_messages.append(SystemMessage(content=self.system_prompt))
         
         full_messages.extend(messages)
@@ -572,11 +578,16 @@ class LLMCaller:
             estimated_tokens = total_chars // 4
 
         if self.logger:
-            self.logger.log_agent_action("token_estimation", {
-                "message_count": len(full_messages),
-                "estimated_tokens": estimated_tokens,
-                "total_chars": total_chars,
-            })
+            should_log_token_estimation = (
+                self.logging_config is not None
+                and getattr(self.logging_config, 'log_token_estimation', False)
+            )
+            if should_log_token_estimation:
+                self.logger.log_agent_action("token_estimation", {
+                    "message_count": len(full_messages),
+                    "estimated_tokens": estimated_tokens,
+                    "total_chars": total_chars,
+                })
         
         if self.max_context_tokens and estimated_tokens >= self.max_context_tokens - 3000:
             if self.logger:
