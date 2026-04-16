@@ -26,6 +26,7 @@ from langchain_core.tools import BaseTool
 
 from ..context.compressor import ContextCompressor
 from ..context.conversation_history import ConversationHistory, ConversationTurn, AssistantStep
+from ..context.session_storage import SessionStorage, SessionMetadata, SubSessionRef
 from ..context.system_prompt_registry import SystemPromptRegistry
 from ..context.tool_result_storage import ToolResultStorage, ContentReplacementState
 from ..skills.parser import SkillMetadata
@@ -208,6 +209,8 @@ class QueryEngineConfig:
     conversation_history: Optional[ConversationHistory] = None
     skill_stale_timeout_seconds: int = 300
     logging_config: Optional[Any] = None
+    session_storage: Optional[SessionStorage] = None
+    role_name: str = ""
 
 
 class QueryEngine:
@@ -226,6 +229,17 @@ class QueryEngine:
         self._is_running: bool = False
         self._reactive_compact_attempted: bool = False
         self.logger = get_llm_logger()
+        self._session_storage: Optional[SessionStorage] = config.session_storage
+        if self._session_storage:
+            skill_names = [s.name for s in config.skills if hasattr(s, 'name')]
+            self._session_storage.save_session(
+                self._session_id, [],
+                metadata={
+                    "role": config.role_name,
+                    "model": config.model_name or "",
+                    "skills": skill_names,
+                },
+            )
         
         # 创建 LLMCaller，传递 logger 和 timeout
         timeout = config.llm_timeout if config.llm_timeout is not None else 300.0
@@ -234,6 +248,7 @@ class QueryEngine:
             self.llm_caller = config.llm
             self.llm_caller.tools = config.tools
             self.llm_caller.system_prompt = config.custom_system_prompt
+            self.llm_caller.system_prompt_registry = config.system_prompt_registry
             self.llm_caller.logger = self.logger
             self.llm_caller.timeout = timeout
             self.llm_caller.max_context_tokens = config.max_context_tokens
@@ -352,6 +367,15 @@ class QueryEngine:
                 session_id=self._session_id,
                 total_turns=self._current_turn
             )
+            
+            if self._session_storage:
+                try:
+                    self._session_storage.append_messages(
+                        self._session_id, self.mutable_messages,
+                        metadata={"role": self.config.role_name, "model": self.config.model_name or ""},
+                    )
+                except Exception:
+                    pass
             
         except asyncio.CancelledError:
             yield SDKMessage.interrupt(
@@ -886,13 +910,14 @@ class QueryEngine:
         })
     
     def clear_messages(self) -> None:
-        """清空消息列表"""
         self.mutable_messages.clear()
         self._session_id = str(uuid.uuid4())
         self._current_turn = 0
         self.total_usage = Usage()
         self.permission_denials.clear()
         self.abort_controller.reset()
+        if self._session_storage:
+            self._session_storage.save_session(self._session_id, [], metadata={"role": "", "model": ""})
     
     def add_message(self, message: BaseMessage) -> None:
         """添加消息
@@ -1097,3 +1122,23 @@ class QueryEngine:
         
         if self._compressor is not None:
             self._compressor.update_usage_from_response(response)
+    
+    def load_session(self, session_id: str) -> bool:
+        if not self._session_storage:
+            return False
+        try:
+            metadata, messages = self._session_storage.load_session_with_meta(session_id)
+            self._session_id = session_id
+            self.mutable_messages = messages
+            return True
+        except Exception:
+            return False
+    
+    def get_session_metadata(self) -> Optional[SessionMetadata]:
+        if not self._session_storage:
+            return None
+        return self._session_storage.get_session_metadata(self._session_id)
+    
+    def update_session_metadata(self, **kwargs) -> None:
+        if self._session_storage:
+            self._session_storage.append_messages(self._session_id, self.mutable_messages, metadata=kwargs)

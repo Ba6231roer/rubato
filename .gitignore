@@ -64,6 +64,7 @@ logs/
 venv/
 dev_docs/
 .playwright-cli/
+.rubato/
 skills/playwright-cli/
 config/model_config_local.yaml
 test_case_path/

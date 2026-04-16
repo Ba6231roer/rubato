@@ -5,6 +5,7 @@ SubAgent 管理器
 """
 
 import asyncio
+from datetime import datetime
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from pathlib import Path
@@ -13,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 import yaml
 
 from ..config.models import RoleConfig
+from ..context.session_storage import SessionStorage, SubSessionRef
 from ..utils.logger import get_llm_logger
 from ..tools.docs import generate_tool_docs_for_prompt
 from .query_engine import QueryEngine, QueryEngineConfig, SubmitOptions, SDKMessage
@@ -172,7 +174,8 @@ class SubAgentManager:
         sub_agents_dir: str = "sub_agents",
         roles_dir: str = "config/roles",
         recursion_limit: int = 50,
-        max_concurrent: int = 10
+        max_concurrent: int = 10,
+        session_storage: Optional[SessionStorage] = None
     ):
         """初始化 SubAgent 管理器
         
@@ -183,6 +186,7 @@ class SubAgentManager:
             roles_dir: 角色配置目录
             recursion_limit: 递归调用限制
             max_concurrent: 最大并发 SubAgent 数量
+            session_storage: 会话存储实例
         """
         self.llm = llm
         self.parent_agent = parent_agent
@@ -191,6 +195,7 @@ class SubAgentManager:
         if not self.roles_dir.is_absolute():
             self.roles_dir = Path.cwd() / self.roles_dir
         self.recursion_limit = recursion_limit
+        self._session_storage = session_storage
         
         self.agent_definitions: Dict[str, SubAgentDefinition] = {}
         self._load_agent_definitions()
@@ -777,15 +782,15 @@ class SubAgentManager:
     def _create_llm(self, definition: SubAgentDefinition) -> Any:
         """创建 LLM 实例
         
+        始终创建新的 LLMCaller 实例，避免共享父 Agent 的可变状态
+        （system_prompt_registry 等属性会污染子 Agent 的系统提示词）。
+        
         Args:
             definition: SubAgent 定义
             
         Returns:
             LLM 实例
         """
-        if definition.model.inherit:
-            return self.llm
-        
         model_config = ConfigInheritanceResolver.resolve_model_config(
             self.parent_agent.config.model.model,
             definition.model
@@ -870,6 +875,7 @@ class SubAgentManager:
             retry_max_count=self.parent_agent.config.model.parameters.retry_max_count if hasattr(self.parent_agent, 'config') else 3,
             retry_initial_delay=self.parent_agent.config.model.parameters.retry_initial_delay if hasattr(self.parent_agent, 'config') else 10.0,
             retry_max_delay=self.parent_agent.config.model.parameters.retry_max_delay if hasattr(self.parent_agent, 'config') else 60.0,
+            session_storage=self._session_storage,
         )
         
         return QueryEngine(query_config)
@@ -903,6 +909,13 @@ class SubAgentManager:
             "session_id": session_id
         })
         
+        parent_session_id = ""
+        if hasattr(self.parent_agent, 'get_current_session_id'):
+            parent_session_id = self.parent_agent.get_current_session_id()
+        
+        if self._session_storage and parent_session_id:
+            sub_agent.update_session_metadata(parent_session_id=parent_session_id)
+        
         messages_for_log = []
         system_prompt_content = definition.get_system_prompt_content(self.sub_agents_dir)
         if system_prompt_content:
@@ -917,11 +930,22 @@ class SubAgentManager:
             try:
                 if attempt > 0:
                     sub_agent = QueryEngine(sub_agent.config)
+                    if self._session_storage and parent_session_id:
+                        sub_agent.update_session_metadata(parent_session_id=parent_session_id)
                 
                 final_result = await asyncio.wait_for(
                     self._collect_query_result(sub_agent, task),
                     timeout=definition.execution.timeout
                 )
+                
+                if self._session_storage and parent_session_id:
+                    sub_ref = SubSessionRef(
+                        session_id=sub_agent.get_session_id(),
+                        agent_name=definition.name,
+                        relation="spawn",
+                        timestamp=datetime.now().isoformat()
+                    )
+                    self._session_storage.save_sub_session_ref(parent_session_id, sub_ref)
                 
                 self._logger.log_agent_action("sub_agent_execution_success", {
                     "name": definition.name,

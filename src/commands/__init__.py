@@ -8,7 +8,7 @@ from .impl import (
     HelpCommand, QuitCommand, ConfigCommand, RoleCommand,
     SkillCommand, ToolCommand, BrowserCommand, HistoryCommand,
     ClearCommand, NewCommand, ReloadCommand, PromptCommand,
-    StatusCommand
+    StatusCommand, SessionCommand
 )
 
 __all__ = [
@@ -32,4 +32,5 @@ __all__ = [
     'ReloadCommand',
     'PromptCommand',
     'StatusCommand',
+    'SessionCommand',
 ]

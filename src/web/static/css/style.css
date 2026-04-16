@@ -1212,3 +1212,320 @@ body {
     max-height: 400px;
     overflow-y: auto;
 }
+
+.tool-call {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin: 4px 0;
+    white-space: normal;
+    background: rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+}
+
+.tool-call-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.tool-call-header:hover {
+    background: rgba(74, 144, 217, 0.1);
+}
+
+.tool-call-icon {
+    font-size: 0.75rem;
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.tool-call:not(.collapsed) .tool-call-icon {
+    transform: rotate(90deg);
+}
+
+.tool-call-name {
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: var(--primary-color);
+}
+
+.tool-call-args-summary {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tool-call-body {
+    padding: 0 12px 8px;
+}
+
+.tool-call.collapsed .tool-call-body {
+    display: none;
+}
+
+.tool-call-body pre {
+    background: var(--content-bg);
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+    margin: 0;
+}
+
+.tool-result {
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    margin: 2px 0 4px;
+    white-space: normal;
+    background: rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+}
+
+.tool-result-header {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--success-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.tool-result-content {
+    background: var(--content-bg);
+    padding: 8px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 300px;
+    overflow-y: auto;
+    margin: 4px 12px;
+}
+
+.sub-agent-call {
+    border: 1px solid #3b5998;
+    border-radius: 6px;
+    margin: 8px 0;
+    white-space: normal;
+    background: rgba(59, 89, 152, 0.1);
+    overflow: hidden;
+}
+
+.sub-agent-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.sub-agent-header:hover {
+    background: rgba(59, 89, 152, 0.2);
+}
+
+.sub-agent-icon {
+    font-size: 0.75rem;
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.sub-agent-call:not(.collapsed) .sub-agent-icon {
+    transform: rotate(90deg);
+}
+
+.sub-agent-name {
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: #6d9eeb;
+}
+
+.sub-agent-task {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+}
+
+.sub-agent-status {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.sub-agent-status.completed {
+    color: var(--success-color);
+}
+
+.sub-agent-body {
+    padding: 0 12px 12px;
+}
+
+.sub-agent-call.collapsed .sub-agent-body {
+    display: none;
+}
+
+.sub-agent-messages {
+    padding: 8px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.sub-msg {
+    padding: 6px 10px;
+    margin: 4px 0;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.sub-msg.user {
+    background: var(--user-msg-bg);
+    color: var(--text-color);
+}
+
+.sub-msg.assistant {
+    background: rgba(109, 158, 235, 0.15);
+    color: var(--text-color);
+}
+
+.sub-msg.tool-call {
+    background: rgba(0, 0, 0, 0.2);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.sub-msg.system {
+    background: transparent;
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    font-size: 0.75rem;
+}
+
+#session-history-btn {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 1rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+#session-history-btn:hover {
+    background-color: rgba(74, 144, 217, 0.1);
+    color: var(--text-color);
+}
+
+.session-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    width: 300px;
+    height: 100vh;
+    background-color: var(--sidebar-bg);
+    border-left: 1px solid var(--border-color);
+    box-shadow: -4px 0 16px rgba(0, 0, 0, 0.3);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(0);
+    transition: transform 0.3s ease;
+}
+
+.session-panel.hidden {
+    transform: translateX(100%);
+}
+
+.session-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.session-panel-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+#session-panel-close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.125rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+#session-panel-close:hover {
+    background-color: rgba(74, 144, 217, 0.1);
+    color: var(--text-color);
+}
+
+.session-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.session-item {
+    padding: 12px;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background-color 0.2s;
+    border-radius: 4px;
+    margin-bottom: 4px;
+}
+
+.session-item:hover {
+    background-color: rgba(74, 144, 217, 0.1);
+}
+
+.session-item:last-child {
+    border-bottom: none;
+}
+
+.session-item-role {
+    font-weight: 600;
+    font-size: 0.875rem;
+    margin-bottom: 4px;
+}
+
+.session-item-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.session-item-desc {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

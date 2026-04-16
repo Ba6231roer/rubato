@@ -106,6 +106,22 @@ const API = {
             throw new Error(error.detail || '命令执行失败');
         }
         return response.json();
+    },
+    
+    async getSessions() {
+        const response = await fetch(`${this.baseUrl}/api/sessions`);
+        if (!response.ok) {
+            throw new Error(`获取会话列表失败: ${response.statusText}`);
+        }
+        return response.json();
+    },
+    
+    async getSession(sessionId) {
+        const response = await fetch(`${this.baseUrl}/api/sessions/${encodeURIComponent(sessionId)}`);
+        if (!response.ok) {
+            throw new Error(`获取会话详情失败: ${response.statusText}`);
+        }
+        return response.json();
     }
 };
 

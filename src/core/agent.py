@@ -15,6 +15,7 @@ from .sub_agents import SubAgentManager, create_spawn_agent_tool
 from ..utils.logger import get_llm_logger
 from ..tools.docs import generate_tool_docs_for_prompt
 from .query_engine import QueryEngine, QueryEngineConfig, FileStateCache
+from ..context.session_storage import SessionStorage
 
 
 
@@ -30,7 +31,8 @@ class RubatoAgent:
         tool_registry: ToolRegistry,
         mcp_manager = None,
         role_config: Optional[RoleConfig] = None,
-        roles_dir: str = "config/roles"
+        roles_dir: str = "config/roles",
+        session_storage: Optional[SessionStorage] = None
     ):
         self.config = config
         self.skill_loader = skill_loader
@@ -39,6 +41,7 @@ class RubatoAgent:
         self.mcp_manager = mcp_manager
         self.role_config = role_config
         self.roles_dir = roles_dir
+        self._session_storage = session_storage
         self.logger = get_llm_logger()
         
         self.logging_config = config.agent.logging
@@ -84,7 +87,8 @@ class RubatoAgent:
             parent_agent=self,
             sub_agents_dir="sub_agents",
             roles_dir=self.roles_dir,
-            recursion_limit=sub_agent_recursion_limit
+            recursion_limit=sub_agent_recursion_limit,
+            session_storage=self._session_storage
         )
         
         self._ensure_spawn_agent_tool()
@@ -154,6 +158,8 @@ class RubatoAgent:
             retry_max_delay=self.config.model.parameters.retry_max_delay,
             system_prompt_registry=self._system_prompt_registry,
             logging_config=self.logging_config,
+            session_storage=self._session_storage,
+            role_name=self.get_role_name(),
         )
         
         return QueryEngine(query_config)
@@ -435,6 +441,8 @@ class RubatoAgent:
         elif self._query_engine is None:
             self._query_engine = self._create_query_engine()
         
+        self._query_engine.update_session_metadata(role=self.get_role_name(), model=self.llm.model_name if hasattr(self.llm, 'model_name') else "")
+        
         self.logger.log_agent_action("query_engine_start", {
             "session_id": self._query_engine.get_session_id(),
             "prompt_length": len(user_input)
@@ -531,6 +539,8 @@ class RubatoAgent:
         elif self._query_engine is None:
             self._query_engine = self._create_query_engine()
         
+        self._query_engine.update_session_metadata(role=self.get_role_name(), model=self.llm.model_name if hasattr(self.llm, 'model_name') else "")
+        
         self.logger.log_agent_action("query_engine_stream_start", {
             "session_id": self._query_engine.get_session_id(),
             "prompt_length": len(user_input)
@@ -604,6 +614,90 @@ class RubatoAgent:
             })
             yield f"执行错误: {str(e)}"
     
+    async def run_stream_structured(self, user_input: str):
+        from .query_engine import SDKMessage, SubmitOptions
+        
+        role_name = self.get_role_name()
+        self.logger.set_role_context(role_name)
+        self.logger.log_agent_thinking(f"收到用户输入: {user_input}")
+        
+        file_paths = self._extract_file_paths_from_input(user_input)
+        if file_paths:
+            activated = self.activate_skills_for_paths(file_paths)
+            if activated:
+                self.logger.log_agent_action("auto_activated_skills", {
+                    "skills": activated,
+                    "extracted_paths": file_paths
+                })
+        
+        if self.mcp_manager and self.mcp_manager.is_connected:
+            browser_ok = await self.mcp_manager.ensure_browser()
+            if not browser_ok:
+                yield SDKMessage.error("浏览器初始化失败，请检查 MCP 连接", error_type="browser")
+                return
+        
+        skill_name = self.skill_loader.find_matching_skill(user_input)
+        
+        if skill_name and not self.context_manager.is_skill_loaded(skill_name):
+            self.logger.log_agent_action("loading_skill", {"skill": skill_name})
+            skill_content = await self.skill_loader.load_full_skill(skill_name)
+            self._system_prompt_registry.add_skill(skill_name, skill_content)
+            self._current_system_prompt = self._system_prompt_registry.build()
+            self._rebuild_query_engine()
+            self.context_manager.mark_skill_loaded(skill_name)
+        elif self._query_engine is None:
+            self._query_engine = self._create_query_engine()
+        
+        self.logger.log_agent_action("query_engine_stream_start", {
+            "session_id": self._query_engine.get_session_id(),
+            "prompt_length": len(user_input)
+        })
+        
+        start_time = time.time()
+        
+        try:
+            options = SubmitOptions(stream=True)
+            
+            async for message in self._query_engine.submit_message(user_input, options):
+                if message.type == "tool_use":
+                    tool_info = message.content
+                    self.logger.log_tool_call(
+                        tool_info.get("name", "unknown"),
+                        tool_info.get("args", {})
+                    )
+                elif message.type == "tool_result":
+                    tool_info = message.content
+                    self.logger.log_tool_result(
+                        tool_info.get("name", "unknown"),
+                        tool_info.get("result", "")
+                    )
+                elif message.type == "error":
+                    error_info = message.content
+                    self.logger.log_error("query_engine", Exception(
+                        f"{error_info.get('error_type', 'unknown')}: {error_info.get('message', '')}"
+                    ))
+                
+                yield message
+            
+            elapsed = time.time() - start_time
+            usage = self._query_engine.get_usage()
+            
+            self.logger.log_agent_action("query_engine_stream_complete", {
+                "elapsed_seconds": round(elapsed, 2),
+                "total_tokens": usage.total_tokens,
+                "cost_usd": usage.cost_usd
+            })
+            
+        except Exception as e:
+            import traceback
+            self.logger.log_error("query_engine_stream", e)
+            self.logger.log_agent_action("query_engine_stream_error", {
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "traceback": traceback.format_exc()
+            })
+            yield SDKMessage.error(str(e), error_type=type(e).__name__)
+
     async def _inject_skill(self, skill_name: str) -> str:
         skill_content = await self.skill_loader.load_full_skill(skill_name)
         
@@ -657,7 +751,8 @@ class RubatoAgent:
                 llm=self.llm,
                 parent_agent=self,
                 sub_agents_dir="sub_agents",
-                recursion_limit=sub_agent_recursion_limit
+                recursion_limit=sub_agent_recursion_limit,
+                session_storage=self._session_storage
             )
         
         self._ensure_spawn_agent_tool()
@@ -730,6 +825,56 @@ class RubatoAgent:
     def clear_context(self) -> None:
         self.context_manager.clear()
         self._query_engine = self._create_query_engine()
+    
+    def load_session(self, session_id: str) -> bool:
+        if not self._session_storage or not self._query_engine:
+            return False
+        metadata = self._session_storage.get_session_metadata(session_id)
+        if not metadata:
+            return False
+        _, messages = self._session_storage.load_session_with_meta(session_id)
+        
+        if metadata.role and metadata.role != self.get_role_name():
+            try:
+                from ..config.role_loader import RoleConfigLoader
+                loader = RoleConfigLoader(self.roles_dir)
+                role_config = loader.get_role(metadata.role)
+                if role_config:
+                    self.reload_system_prompt(role_config)
+                    if metadata.model:
+                        from ..config.models import ModelConfigLoader
+                        model_loader = ModelConfigLoader()
+                        merged_model = model_loader.get_merged_config(metadata.role)
+                        if merged_model:
+                            self.llm = self._create_llm(merged_model)
+            except Exception:
+                self.logger.log_agent_action("session_role_restore_failed", {
+                    "session_id": session_id,
+                    "role": metadata.role
+                })
+        
+        if self._query_engine and messages:
+            self._query_engine.mutable_messages = messages
+            self._query_engine._session_id = session_id
+            if self._session_storage:
+                self._session_storage.append_messages(
+                    session_id, messages, metadata={"role": metadata.role, "model": metadata.model}
+                )
+        
+        self.logger.log_agent_action("session_loaded", {
+            "session_id": session_id,
+            "role": metadata.role,
+            "message_count": len(messages) if messages else 0
+        })
+        return True
+    
+    def get_session_storage(self) -> Optional[SessionStorage]:
+        return self._session_storage
+    
+    def get_current_session_id(self) -> str:
+        if self._query_engine:
+            return self._query_engine.get_session_id()
+        return ""
     
     def interrupt(self, reason: str = "用户中断") -> None:
         if self._query_engine is not None and self._query_engine.is_running():

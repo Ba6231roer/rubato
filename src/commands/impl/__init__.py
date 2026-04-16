@@ -11,6 +11,7 @@ from .new import NewCommand
 from .reload import ReloadCommand
 from .prompt import PromptCommand
 from .status import StatusCommand
+from .session import SessionCommand
 
 __all__ = [
     'HelpCommand',
@@ -26,4 +27,5 @@ __all__ = [
     'ReloadCommand',
     'PromptCommand',
     'StatusCommand',
+    'SessionCommand',
 ]

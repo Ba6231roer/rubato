@@ -88,3 +88,34 @@ class CommandResponse(BaseModel):
     message: str
     data: Optional[dict] = None
     actions: List[str] = []
+
+
+class SessionInfo(BaseModel):
+    session_id: str
+    role: str = ""
+    model: str = ""
+    message_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+    description: str = ""
+    parent_session_id: Optional[str] = None
+
+
+class SessionDetail(BaseModel):
+    session_id: str
+    role: str = ""
+    model: str = ""
+    message_count: int = 0
+    created_at: str = ""
+    updated_at: str = ""
+    description: str = ""
+    parent_session_id: Optional[str] = None
+    sub_sessions: List[dict] = []
+    messages: List[dict] = []
+
+
+class SessionLoadResponse(BaseModel):
+    success: bool
+    message: str
+    session_id: str = ""
+    messages: List[dict] = []

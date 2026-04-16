@@ -8,7 +8,8 @@ from ..commands import CommandDispatcher, CommandContext
 from ..commands import (
     HelpCommand, QuitCommand, ConfigCommand, RoleCommand,
     SkillCommand, ToolCommand, BrowserCommand, HistoryCommand,
-    ClearCommand, NewCommand, ReloadCommand, PromptCommand
+    ClearCommand, NewCommand, ReloadCommand, PromptCommand,
+    SessionCommand
 )
 
 websocket_router = APIRouter()
@@ -184,17 +185,18 @@ async def handle_task(websocket: WebSocket, task_content: str):
         try:
             full_response = ""
             
-            async for chunk in state.agent.run_stream(task_content):
-                if chunk:
-                    full_response += chunk
-                    await manager.send_message(websocket, {
-                        "type": "chunk",
-                        "content": chunk
-                    })
+            async for sdk_msg in state.agent.run_stream_structured(task_content):
+                message = _sdk_message_to_structured(sdk_msg)
+                await manager.send_message(websocket, {
+                    "type": "chunk",
+                    "message": message
+                })
+                if sdk_msg.type == "assistant" and isinstance(sdk_msg.content, str):
+                    full_response += sdk_msg.content
             
             await manager.send_message(websocket, {
                 "type": "done",
-                "content": full_response
+                "message": {"role": "assistant", "content": full_response, "streaming": False}
             })
         except asyncio.CancelledError:
             await manager.send_message(websocket, {
@@ -211,3 +213,33 @@ async def handle_task(websocket: WebSocket, task_content: str):
             _current_task = None
     
     _current_task = asyncio.create_task(run_task())
+
+
+def _sdk_message_to_structured(sdk_msg) -> dict:
+    if sdk_msg.type == "assistant":
+        return {"role": "assistant", "content": sdk_msg.content, "streaming": True}
+    elif sdk_msg.type == "tool_use":
+        return {
+            "role": "assistant",
+            "tool_calls": [{
+                "name": sdk_msg.content.get("name", ""),
+                "args": sdk_msg.content.get("args", {}),
+                "id": sdk_msg.content.get("id", "")
+            }],
+            "streaming": True
+        }
+    elif sdk_msg.type == "tool_result":
+        return {
+            "role": "tool",
+            "content": str(sdk_msg.content.get("result", "")),
+            "tool_call_id": sdk_msg.content.get("id", ""),
+            "name": sdk_msg.content.get("name", "")
+        }
+    elif sdk_msg.type == "error":
+        error_msg = sdk_msg.content.get("message", str(sdk_msg.content)) if isinstance(sdk_msg.content, dict) else str(sdk_msg.content)
+        return {"role": "assistant", "content": f"[错误: {error_msg}]", "streaming": True}
+    elif sdk_msg.type == "interrupt":
+        reason = sdk_msg.content.get("reason", "") if isinstance(sdk_msg.content, dict) else str(sdk_msg.content)
+        return {"role": "assistant", "content": f"[中断: {reason}]", "streaming": True}
+    else:
+        return {"role": "assistant", "content": str(sdk_msg.content), "streaming": True}

@@ -1,7 +1,7 @@
 """Context module - Context manager, compressor and session storage"""
 from .manager import ContextManager
 from .compressor import ContextCompressor
-from .session_storage import SessionStorage, SessionMetadata, MessageSerializer
+from .session_storage import SessionStorage, SessionMetadata, MessageSerializer, SubSessionRef
 
 __all__ = [
     "ContextManager",
@@ -9,4 +9,5 @@ __all__ = [
     "SessionStorage",
     "SessionMetadata",
     "MessageSerializer",
+    "SubSessionRef",
 ]

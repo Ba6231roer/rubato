@@ -26,7 +26,11 @@ class App {
             browserStatus: document.getElementById('browserStatus'),
             skillsList: document.getElementById('skillsList'),
             sidebar: document.querySelector('.sidebar'),
-            sidebarToggle: document.getElementById('sidebarToggle')
+            sidebarToggle: document.getElementById('sidebarToggle'),
+            sessionHistoryBtn: document.getElementById('session-history-btn'),
+            sessionPanel: document.getElementById('session-panel'),
+            sessionPanelClose: document.getElementById('session-panel-close'),
+            sessionList: document.getElementById('session-list')
         };
         
         this.init();
@@ -37,6 +41,7 @@ class App {
         this.initChat();
         this.initWebSocket();
         this.initSidebarToggle();
+        this.initSessionPanel();
         this.loadStatus();
         this.loadSkills();
         this.loadCommands();
@@ -56,6 +61,128 @@ class App {
                 }
             });
         }
+    }
+    
+    initSessionPanel() {
+        if (this.elements.sessionHistoryBtn) {
+            this.elements.sessionHistoryBtn.addEventListener('click', () => this.toggleSessionPanel());
+        }
+        if (this.elements.sessionPanelClose) {
+            this.elements.sessionPanelClose.addEventListener('click', () => this.toggleSessionPanel(false));
+        }
+    }
+    
+    toggleSessionPanel(show) {
+        const panel = this.elements.sessionPanel;
+        if (show === undefined) {
+            show = panel.classList.contains('hidden');
+        }
+        if (show) {
+            panel.classList.remove('hidden');
+            this.loadSessionList();
+        } else {
+            panel.classList.add('hidden');
+        }
+    }
+    
+    async loadSessionList() {
+        try {
+            const sessions = await API.getSessions();
+            this.elements.sessionList.innerHTML = '';
+            if (!sessions || sessions.length === 0) {
+                this.elements.sessionList.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:0.875rem;">暂无会话记录</div>';
+                return;
+            }
+            sessions.sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+            sessions.forEach(session => {
+                const item = document.createElement('div');
+                item.className = 'session-item';
+                item.dataset.sessionId = session.session_id;
+                const updateTime = session.updated_at ? new Date(session.updated_at).toLocaleString('zh-CN') : '--';
+                const msgCount = session.message_count || 0;
+                const desc = session.description || '';
+                item.innerHTML = `
+                    <div class="session-item-role">${this.escapeHtml(session.role || '未知')}</div>
+                    <div class="session-item-meta">${updateTime} · ${msgCount}条消息</div>
+                    ${desc ? `<div class="session-item-desc">${this.escapeHtml(desc)}</div>` : ''}
+                `;
+                item.addEventListener('click', () => this.loadSession(session.session_id));
+                this.elements.sessionList.appendChild(item);
+            });
+        } catch (e) {
+            this.elements.sessionList.innerHTML = '<div style="padding:16px;text-align:center;color:var(--error-color);font-size:0.875rem;">加载失败</div>';
+        }
+    }
+    
+    async loadSession(sessionId) {
+        try {
+            const detail = await API.getSession(sessionId);
+            if (detail && detail.messages) {
+                this.elements.chatMessages.innerHTML = '';
+                this.renderSessionMessages(detail.messages);
+                this.toggleSessionPanel(false);
+                this.showView('chat');
+                this.scrollToBottom();
+            }
+        } catch (e) {
+            console.error('Failed to load session:', e);
+        }
+    }
+    
+    renderSessionMessages(messages) {
+        messages.forEach(msg => {
+            if (msg.role === 'user' || msg.type === 'human') {
+                const msgEl = document.createElement('div');
+                msgEl.className = 'message user';
+                msgEl.innerHTML = `
+                    <div class="message-header">用户</div>
+                    <div class="message-content">${this.escapeHtml(msg.content || '')}</div>
+                `;
+                this.elements.chatMessages.appendChild(msgEl);
+            } else if (msg.role === 'assistant' || msg.type === 'ai') {
+                const msgEl = document.createElement('div');
+                msgEl.className = 'message ai';
+                const contentEl = document.createElement('div');
+                contentEl.className = 'message-content';
+                if (msg.content) {
+                    contentEl.textContent = msg.content;
+                }
+                if (msg.tool_calls) {
+                    msg.tool_calls.forEach(tc => {
+                        const argsStr = JSON.stringify(tc.args, null, 2);
+                        const argsSummary = this.getArgsSummary(tc.args);
+                        const div = document.createElement('div');
+                        div.className = 'tool-call collapsed';
+                        div.dataset.toolCallId = tc.id;
+                        div.innerHTML = `
+                            <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                                <span class="tool-call-icon">▶</span>
+                                <span class="tool-call-name">${this.escapeHtml(tc.name)}</span>
+                                <span class="tool-call-args-summary">${this.escapeHtml(argsSummary)}</span>
+                            </div>
+                            <div class="tool-call-body">
+                                <pre>${this.escapeHtml(argsStr)}</pre>
+                            </div>
+                        `;
+                        contentEl.appendChild(div);
+                    });
+                }
+                msgEl.innerHTML = `<div class="message-header">AI助手</div>`;
+                msgEl.appendChild(contentEl);
+                this.elements.chatMessages.appendChild(msgEl);
+            } else if (msg.role === 'tool' || msg.type === 'tool') {
+                const msgEl = document.createElement('div');
+                msgEl.className = 'message ai';
+                const resultContent = (msg.content || '').length > 500
+                    ? (msg.content || '').substring(0, 500) + '...'
+                    : (msg.content || '');
+                msgEl.innerHTML = `
+                    <div class="message-header">工具: ${this.escapeHtml(msg.name || msg.tool_name || 'tool')}</div>
+                    <div class="message-content"><pre class="tool-result-content">${this.escapeHtml(resultContent)}</pre></div>
+                `;
+                this.elements.chatMessages.appendChild(msgEl);
+            }
+        });
     }
     
     initNavigation() {
@@ -173,10 +300,18 @@ class App {
                 this.handleCommandResult(data.content);
                 break;
             case 'chunk':
-                this.appendAIMessage(data.content);
+                if (data.message) {
+                    this.handleStructuredChunk(data.message);
+                } else {
+                    this.appendAIMessage(data.content);
+                }
                 break;
             case 'done':
-                this.finishAIMessage();
+                if (data.message) {
+                    this.handleStructuredDone(data.message);
+                } else {
+                    this.finishAIMessage();
+                }
                 break;
             case 'error':
                 this.showErrorMessage(data.content);
@@ -254,8 +389,206 @@ class App {
         const msgEl = document.getElementById('current-ai-message');
         if (msgEl) {
             const contentEl = msgEl.querySelector('.message-content');
-            contentEl.textContent += content;
+            contentEl.appendChild(document.createTextNode(content));
             this.scrollToBottom();
+        }
+    }
+    
+    handleStructuredChunk(msg) {
+        if (msg.role === 'assistant') {
+            if (msg.content) {
+                this.appendAIMessage(msg.content);
+            }
+            if (msg.tool_calls) {
+                this.appendToolCalls(msg.tool_calls);
+            }
+        } else if (msg.role === 'tool') {
+            this.appendToolResult(msg);
+        }
+    }
+    
+    handleStructuredDone(msg) {
+        if (msg.role === 'assistant' && msg.content) {
+            const msgEl = document.getElementById('current-ai-message');
+            if (msgEl) {
+                const contentEl = msgEl.querySelector('.message-content');
+                if (!contentEl.textContent) {
+                    contentEl.textContent = msg.content;
+                }
+            }
+        }
+        this.finishAIMessage();
+    }
+    
+    appendToolCalls(toolCalls) {
+        const msgEl = document.getElementById('current-ai-message');
+        if (!msgEl) return;
+        const contentEl = msgEl.querySelector('.message-content');
+        toolCalls.forEach(tc => {
+            if (tc.name === 'spawn_agent') {
+                this.appendSubAgentCall(contentEl, tc);
+            } else {
+                const argsStr = JSON.stringify(tc.args, null, 2);
+                const argsSummary = this.getArgsSummary(tc.args);
+                const div = document.createElement('div');
+                div.className = 'tool-call collapsed';
+                div.dataset.toolCallId = tc.id;
+                div.innerHTML = `
+                    <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span class="tool-call-icon">▶</span>
+                        <span class="tool-call-name">${this.escapeHtml(tc.name)}</span>
+                        <span class="tool-call-args-summary">${this.escapeHtml(argsSummary)}</span>
+                    </div>
+                    <div class="tool-call-body">
+                        <pre>${this.escapeHtml(argsStr)}</pre>
+                    </div>
+                `;
+                contentEl.appendChild(div);
+            }
+        });
+        this.scrollToBottom();
+    }
+    
+    appendToolResult(msg) {
+        const msgEl = document.getElementById('current-ai-message');
+        if (!msgEl) return;
+        const contentEl = msgEl.querySelector('.message-content');
+        if (msg.name === 'spawn_agent') {
+            this.appendSubAgentResult(contentEl, msg);
+            return;
+        }
+        const toolCallEl = contentEl.querySelector(`.tool-call[data-tool-call-id="${msg.tool_call_id}"]`);
+        const resultContent = msg.content.length > 500
+            ? msg.content.substring(0, 500) + '...'
+            : msg.content;
+        const resultDiv = document.createElement('div');
+        resultDiv.className = 'tool-result';
+        resultDiv.dataset.toolCallId = msg.tool_call_id;
+        resultDiv.innerHTML = `
+            <div class="tool-result-header">结果: ${this.escapeHtml(msg.name)}</div>
+            <pre class="tool-result-content">${this.escapeHtml(resultContent)}</pre>
+        `;
+        if (toolCallEl) {
+            toolCallEl.after(resultDiv);
+        } else {
+            contentEl.appendChild(resultDiv);
+        }
+        this.scrollToBottom();
+    }
+    
+    getArgsSummary(args) {
+        if (!args || typeof args !== 'object') return '';
+        const keys = Object.keys(args);
+        if (keys.length === 0) return '';
+        const first = keys[0];
+        const val = args[first];
+        const valStr = typeof val === 'string' ? val : JSON.stringify(val);
+        const truncated = valStr.length > 30 ? valStr.substring(0, 30) + '...' : valStr;
+        return `${first}: ${truncated}`;
+    }
+    
+    appendSubAgentCall(contentEl, tc) {
+        const agentName = tc.args && tc.args.agent_name ? tc.args.agent_name : 'unknown';
+        const task = tc.args && tc.args.task ? tc.args.task : '';
+        const taskSummary = task.length > 50 ? task.substring(0, 50) + '...' : task;
+        const div = document.createElement('div');
+        div.className = 'sub-agent-call collapsed';
+        div.dataset.toolCallId = tc.id;
+        div.dataset.agentName = agentName;
+        div.innerHTML = `
+            <div class="sub-agent-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span class="sub-agent-icon">▶</span>
+                <span class="sub-agent-name">🤖 ${this.escapeHtml(agentName)}</span>
+                <span class="sub-agent-task">${this.escapeHtml(taskSummary)}</span>
+                <span class="sub-agent-status">执行中...</span>
+            </div>
+            <div class="sub-agent-body">
+                <div class="sub-agent-messages"></div>
+            </div>
+        `;
+        contentEl.appendChild(div);
+    }
+    
+    appendSubAgentResult(contentEl, msg) {
+        const subAgentEl = contentEl.querySelector(`.sub-agent-call[data-tool-call-id="${msg.tool_call_id}"]`);
+        if (subAgentEl) {
+            const statusEl = subAgentEl.querySelector('.sub-agent-status');
+            statusEl.textContent = '已完成';
+            statusEl.classList.add('completed');
+            this.tryLoadSubAgentSession(subAgentEl, msg);
+        } else {
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'tool-result';
+            resultDiv.dataset.toolCallId = msg.tool_call_id;
+            resultDiv.innerHTML = `
+                <div class="tool-result-header">结果: spawn_agent</div>
+                <pre class="tool-result-content">${this.escapeHtml(msg.content.length > 500 ? msg.content.substring(0, 500) + '...' : msg.content)}</pre>
+            `;
+            contentEl.appendChild(resultDiv);
+        }
+        this.scrollToBottom();
+    }
+    
+    async tryLoadSubAgentSession(subAgentEl, msg) {
+        const agentName = subAgentEl.dataset.agentName;
+        const messagesEl = subAgentEl.querySelector('.sub-agent-messages');
+        try {
+            const sessionId = this.extractSessionId(msg.content);
+            if (sessionId) {
+                await this.loadSubAgentSessionById(sessionId, messagesEl);
+                return;
+            }
+            const sessions = await API.getSessions();
+            const matching = sessions
+                .filter(s => s.role === agentName && s.parent_session_id)
+                .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+            if (matching.length > 0) {
+                await this.loadSubAgentSessionById(matching[0].session_id, messagesEl);
+                return;
+            }
+            messagesEl.innerHTML = '<div class="sub-msg system">会话详情暂不可用</div>';
+        } catch (e) {
+            messagesEl.innerHTML = '<div class="sub-msg system">内容加载失败</div>';
+        }
+    }
+    
+    extractSessionId(content) {
+        const match = content.match(/session[_\-]?id[:\s]*([a-f0-9\-]{8,})/i);
+        return match ? match[1] : null;
+    }
+    
+    async loadSubAgentSessionById(sessionId, messagesEl) {
+        const detail = await API.getSession(sessionId);
+        if (detail && detail.messages) {
+            this.renderSubAgentMessages(messagesEl, detail.messages);
+        } else {
+            messagesEl.innerHTML = '<div class="sub-msg system">无消息内容</div>';
+        }
+    }
+    
+    renderSubAgentMessages(container, messages) {
+        container.innerHTML = '';
+        messages.forEach(msg => {
+            const div = document.createElement('div');
+            if (msg.type === 'human' || msg.role === 'user') {
+                div.className = 'sub-msg user';
+                div.textContent = msg.content || '';
+            } else if (msg.type === 'ai' || msg.role === 'assistant') {
+                div.className = 'sub-msg assistant';
+                div.textContent = msg.content || '';
+            } else if (msg.type === 'tool' || msg.role === 'tool') {
+                div.className = 'sub-msg tool-call';
+                div.textContent = '🔧 ' + (msg.name || msg.tool_name || 'tool');
+            } else if (msg.type === 'system' || msg.role === 'system') {
+                return;
+            } else {
+                div.className = 'sub-msg';
+                div.textContent = msg.content || '';
+            }
+            container.appendChild(div);
+        });
+        if (!container.children.length) {
+            container.innerHTML = '<div class="sub-msg system">无消息内容</div>';
         }
     }
     

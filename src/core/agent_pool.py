@@ -10,6 +10,7 @@ import threading
 from ..config.models import AppConfig, RoleConfig, ProjectConfig, FileToolsConfig, UnifiedToolsConfig
 from ..config.loader import ConfigLoader
 from ..context.manager import ContextManager
+from ..context.session_storage import SessionStorage
 from ..skills.loader import SkillLoader
 from ..mcp.tools import ToolRegistry
 from ..tools.provider import LocalToolProvider, ShellToolProvider
@@ -422,13 +423,19 @@ class AgentPool:
             role_config=role_config
         )
 
+        project_root = self.config.project.root if self.config.project else Path.cwd()
+        session_storage = SessionStorage(
+            storage_dir=str(project_root / ".rubato" / "sessions")
+        )
+
         agent = RubatoAgent(
             config=self.config,
             skill_loader=skill_loader,
             context_manager=context_manager,
             tool_registry=tool_registry,
             role_config=role_config,
-            roles_dir=self.roles_dir
+            roles_dir=self.roles_dir,
+            session_storage=session_storage
         )
 
         inst_id = instance_id or str(uuid.uuid4())
