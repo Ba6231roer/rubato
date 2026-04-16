@@ -28,6 +28,7 @@ from ..context.compressor import ContextCompressor
 from ..context.conversation_history import ConversationHistory, ConversationTurn, AssistantStep
 from ..context.session_storage import SessionStorage, SessionMetadata, SubSessionRef
 from ..context.system_prompt_registry import SystemPromptRegistry
+from ..context.task_intent_manager import TaskIntentManager
 from ..context.tool_result_storage import ToolResultStorage, ContentReplacementState
 from ..skills.parser import SkillMetadata
 from ..utils.logger import get_llm_logger
@@ -211,6 +212,9 @@ class QueryEngineConfig:
     logging_config: Optional[Any] = None
     session_storage: Optional[SessionStorage] = None
     role_name: str = ""
+    task_intent_protection_enabled: bool = True
+    task_intent_full_threshold: int = 2000
+    task_intent_token_budget: int = 10000
 
 
 class QueryEngine:
@@ -275,9 +279,17 @@ class QueryEngine:
         self.system_prompt_registry = config.system_prompt_registry
         self.conversation_history = config.conversation_history or ConversationHistory()
         self.skill_stale_timeout_seconds = config.skill_stale_timeout_seconds
+        self._compression_enabled = config.compression_enabled
         self.logging_config = config.logging_config
 
-        self._compression_enabled = config.compression_enabled
+        self._task_intent_manager: Optional[TaskIntentManager] = None
+        if config.task_intent_protection_enabled and self._compression_enabled:
+            session_dir = os.path.join(config.cwd, ".rubato", "sessions", self._session_id)
+            self._task_intent_manager = TaskIntentManager(
+                session_dir=session_dir,
+                full_threshold=config.task_intent_full_threshold,
+                token_budget=config.task_intent_token_budget,
+            )
         if self._compression_enabled:
             session_dir = os.path.join(config.cwd, ".rubato", "sessions", self._session_id)
             self._tool_result_storage = ToolResultStorage(
@@ -296,6 +308,7 @@ class QueryEngine:
                 tool_result_storage=self._tool_result_storage,
                 content_replacement_state=self._content_replacement_state,
                 logger=self.logger,
+                task_intent_manager=self._task_intent_manager,
             )
         else:
             self._tool_result_storage = None
@@ -331,6 +344,8 @@ class QueryEngine:
         
         try:
             self.mutable_messages.append(HumanMessage(content=prompt))
+            if self._task_intent_manager is not None:
+                self._task_intent_manager.extract_task_intent(prompt)
             self.conversation_history.start_turn(HumanMessage(content=prompt))
             
             yield SDKMessage.assistant(
@@ -368,15 +383,6 @@ class QueryEngine:
                 total_turns=self._current_turn
             )
             
-            if self._session_storage:
-                try:
-                    self._session_storage.append_messages(
-                        self._session_id, self.mutable_messages,
-                        metadata={"role": self.config.role_name, "model": self.config.model_name or ""},
-                    )
-                except Exception:
-                    pass
-            
         except asyncio.CancelledError:
             yield SDKMessage.interrupt(
                 reason="任务被取消",
@@ -391,6 +397,14 @@ class QueryEngine:
             )
         finally:
             self._is_running = False
+            if self._session_storage and self.mutable_messages:
+                try:
+                    self._session_storage.append_messages(
+                        self._session_id, self.mutable_messages,
+                        metadata={"role": self.config.role_name, "model": self.config.model_name or ""},
+                    )
+                except Exception:
+                    pass
             self.logger.log_agent_action("query_end", {
                 "session_id": self._session_id,
                 "total_turns": self._current_turn,
@@ -781,6 +795,10 @@ class QueryEngine:
                         content="[Post-compact file context]\n" + "\n---\n".join(attachment_parts)
                     )
                     self.mutable_messages.append(attachment_msg)
+        if self._task_intent_manager is not None and self._task_intent_manager.has_task_intent():
+            task_intent_msg = self._task_intent_manager.build_recovery_message(self._compressor)
+            if task_intent_msg is not None:
+                self.mutable_messages.append(task_intent_msg)
 
     async def _force_compact(self) -> bool:
         if self._compressor is None:
@@ -916,6 +934,8 @@ class QueryEngine:
         self.total_usage = Usage()
         self.permission_denials.clear()
         self.abort_controller.reset()
+        if self._task_intent_manager is not None:
+            self._task_intent_manager.clear()
         if self._session_storage:
             self._session_storage.save_session(self._session_id, [], metadata={"role": "", "model": ""})
     

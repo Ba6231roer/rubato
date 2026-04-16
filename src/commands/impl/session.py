@@ -63,7 +63,7 @@ class SessionCommand(BaseCommand):
         lines = ["会话列表："]
         session_list = []
         for i, meta in enumerate(sessions, 1):
-            sid = meta.session_id[:6] + "..."
+            sid = meta.session_id
             role = meta.role or "-"
             msg_count = meta.message_count
             updated = self._format_datetime(meta.updated_at)

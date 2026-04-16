@@ -4,6 +4,7 @@ from typing import List, Optional, Set, Tuple, Dict
 
 from .tool_result_storage import ToolResultStorage, ContentReplacementState, apply_tool_result_budget, TOOL_RESULT_CLEARED_MESSAGE
 from .compact_prompt import get_compact_prompt, format_compact_summary, get_compact_user_summary_message
+from .task_intent_manager import TaskIntentManager
 from ..utils.logger import get_llm_logger
 
 
@@ -24,6 +25,7 @@ class ContextCompressor:
         tool_result_storage=None,
         content_replacement_state=None,
         logger=None,
+        task_intent_manager: Optional[TaskIntentManager] = None,
     ):
         self.llm_caller = llm_caller
         self.max_context_tokens = max_context_tokens
@@ -38,6 +40,7 @@ class ContextCompressor:
         self.tool_result_storage = tool_result_storage
         self.content_replacement_state = content_replacement_state
         self.logger = logger or get_llm_logger()
+        self.task_intent_manager = task_intent_manager
 
         self.encoding = tiktoken.get_encoding("cl100k_base")
         self._last_api_usage_tokens: int = 0
@@ -168,10 +171,19 @@ class ContextCompressor:
         boundary = self._create_compact_boundary_message("auto", pre_tokens)
         summary_msg = self._create_summary_message(user_summary)
 
+        if self.task_intent_manager is not None and self.task_intent_manager.has_task_intent():
+            valid_recent = [
+                msg for msg in valid_recent
+                if not (isinstance(msg, HumanMessage) and isinstance(msg.content, str) and msg.content.startswith("[Task Intent - PRESERVED]"))
+            ]
+            task_intent_msg = self.task_intent_manager.build_recovery_message(self)
+        else:
+            task_intent_msg = None
+
         if self.tool_result_storage and hasattr(self.tool_result_storage, 'read_file_state') and self.tool_result_storage.read_file_state is not None:
             self.tool_result_storage.read_file_state.clear()
 
-        return system_messages + [boundary, summary_msg] + valid_recent
+        return system_messages + [boundary, summary_msg] + ([task_intent_msg] if task_intent_msg else []) + valid_recent
 
     async def auto_compact_if_needed(self, messages: List[BaseMessage], snip_tokens_freed: int = 0) -> List[BaseMessage]:
         current_tokens = self.estimate_tokens(messages) - snip_tokens_freed

@@ -17,23 +17,25 @@ BASE_COMPACT_PROMPT = """Your task is to create a detailed summary of the conver
 
 Analyze the conversation and produce a structured summary with the following sections:
 
-1. **Primary Request and Intent**: The user's main goal and what they are trying to accomplish. Be specific about their requirements and constraints.
+1. **Primary Request and Intent**: The user's main goal and what they are trying to accomplish. Be specific about their requirements and constraints. If the user provided a specific task specification, test case steps, or operation checklist, you MUST preserve the core content of these specifications in full detail, including step numbers, operation targets, and key parameters.
 
-2. **Key Technical Concepts**: Technologies, frameworks, libraries, APIs, and key technical details relevant to the conversation. Include version numbers if mentioned.
+2. **Task Specification**: If the user provided a specific task specification, test case steps, or operation checklist, reproduce it here with as much detail as possible. Include step numbers, operation targets, expected results, and key parameters. If no specific task specification was provided, write 'N/A'.
 
-3. **Files and Code Sections**: List all files that were created, modified, or discussed. For each file, describe what was changed and why. Include relevant code snippets or describe the key logic.
+3. **Key Technical Concepts**: Technologies, frameworks, libraries, APIs, and key technical details relevant to the conversation. Include version numbers if mentioned.
 
-4. **Errors and Fixes**: Any errors encountered during the conversation and how they were resolved. Include error messages and the solutions applied.
+4. **Files and Code Sections**: List all files that were created, modified, or discussed. For each file, describe what was changed and why. Include relevant code snippets or describe the key logic.
 
-5. **Problem Solving**: Describe the problem-solving approach taken. What strategies were tried, what worked, and what didn't. Include any debugging steps.
+5. **Errors and Fixes**: Any errors encountered during the conversation and how they were resolved. Include error messages and the solutions applied.
 
-6. **All User Messages**: A complete list of all messages sent by the user, in order. Preserve the exact intent of each message.
+6. **Problem Solving**: Describe the problem-solving approach taken. What strategies were tried, what worked, and what didn't. Include any debugging steps.
 
-7. **Pending Tasks**: Any tasks that were requested but not yet completed. Be specific about what remains to be done.
+7. **All User Messages**: A complete list of all messages sent by the user, in order. Preserve the exact intent of each message. Pay special attention to preserving the content of the user's FIRST message, which contains the core task objective for the entire conversation.
 
-8. **Current Work**: What was being actively worked on when the conversation ended. Include the current state of any in-progress changes.
+8. **Pending Tasks**: Any tasks that were requested but not yet completed. Be specific about what remains to be done.
 
-9. **Optional Next Step**: Suggest the next logical step to continue the work, based on the current state and pending tasks.
+9. **Current Work**: What was being actively worked on when the conversation ended. Include the current state of any in-progress changes.
+
+10. **Optional Next Step**: Suggest the next logical step to continue the work, based on the current state and pending tasks.
 
 First, draft your analysis in an <analysis> block. Think through each section carefully, considering what information is essential for continuing the conversation. Then, produce your structured summary in a <summary> block.
 
@@ -45,28 +47,31 @@ First, draft your analysis in an <analysis> block. Think through each section ca
 1. Primary Request and Intent:
 [Fill in]
 
-2. Key Technical Concepts:
+2. Task Specification:
 [Fill in]
 
-3. Files and Code Sections:
+3. Key Technical Concepts:
 [Fill in]
 
-4. Errors and Fixes:
+4. Files and Code Sections:
 [Fill in]
 
-5. Problem Solving:
+5. Errors and Fixes:
 [Fill in]
 
-6. All User Messages:
+6. Problem Solving:
 [Fill in]
 
-7. Pending Tasks:
+7. All User Messages:
 [Fill in]
 
-8. Current Work:
+8. Pending Tasks:
 [Fill in]
 
-9. Optional Next Step:
+9. Current Work:
+[Fill in]
+
+10. Optional Next Step:
 [Fill in]
 </summary>"""
 
@@ -75,23 +80,25 @@ PARTIAL_COMPACT_PROMPT_FROM = """Your task is to create a detailed summary of th
 
 Analyze the recent messages and produce a structured summary with the following sections:
 
-1. **Primary Request and Intent**: The user's main goal in the recent messages and what they are trying to accomplish. Be specific about their requirements and constraints.
+1. **Primary Request and Intent**: The user's main goal in the recent messages and what they are trying to accomplish. Be specific about their requirements and constraints. If the user provided a specific task specification, test case steps, or operation checklist, you MUST preserve the core content of these specifications in full detail, including step numbers, operation targets, and key parameters.
 
-2. **Key Technical Concepts**: Technologies, frameworks, libraries, APIs, and key technical details relevant to the recent messages. Include version numbers if mentioned.
+2. **Task Specification**: If the user provided a specific task specification, test case steps, or operation checklist, reproduce it here with as much detail as possible. Include step numbers, operation targets, expected results, and key parameters. If no specific task specification was provided, write 'N/A'.
 
-3. **Files and Code Sections**: List all files that were created, modified, or discussed in the recent messages. For each file, describe what was changed and why. Include relevant code snippets or describe the key logic.
+3. **Key Technical Concepts**: Technologies, frameworks, libraries, APIs, and key technical details relevant to the recent messages. Include version numbers if mentioned.
 
-4. **Errors and Fixes**: Any errors encountered in the recent messages and how they were resolved. Include error messages and the solutions applied.
+4. **Files and Code Sections**: List all files that were created, modified, or discussed in the recent messages. For each file, describe what was changed and why. Include relevant code snippets or describe the key logic.
 
-5. **Problem Solving**: Describe the problem-solving approach taken in the recent messages. What strategies were tried, what worked, and what didn't. Include any debugging steps.
+5. **Errors and Fixes**: Any errors encountered in the recent messages and how they were resolved. Include error messages and the solutions applied.
 
-6. **All User Messages**: A complete list of all user messages in the recent portion, in order. Preserve the exact intent of each message.
+6. **Problem Solving**: Describe the problem-solving approach taken in the recent messages. What strategies were tried, what worked, and what didn't. Include any debugging steps.
 
-7. **Pending Tasks**: Any tasks that were requested but not yet completed. Be specific about what remains to be done.
+7. **All User Messages**: A complete list of all user messages in the recent portion, in order. Preserve the exact intent of each message. Pay special attention to preserving the content of the user's FIRST message, which contains the core task objective for the entire conversation.
 
-8. **Current Work**: What was being actively worked on in the recent messages. Include the current state of any in-progress changes.
+8. **Pending Tasks**: Any tasks that were requested but not yet completed. Be specific about what remains to be done.
 
-9. **Optional Next Step**: Suggest the next logical step to continue the work, based on the current state and pending tasks.
+9. **Current Work**: What was being actively worked on in the recent messages. Include the current state of any in-progress changes.
+
+10. **Optional Next Step**: Suggest the next logical step to continue the work, based on the current state and pending tasks.
 
 First, draft your analysis in an <analysis> block. Think through each section carefully, considering what information is essential for continuing the conversation. Then, produce your structured summary in a <summary> block.
 
@@ -103,28 +110,31 @@ First, draft your analysis in an <analysis> block. Think through each section ca
 1. Primary Request and Intent:
 [Fill in]
 
-2. Key Technical Concepts:
+2. Task Specification:
 [Fill in]
 
-3. Files and Code Sections:
+3. Key Technical Concepts:
 [Fill in]
 
-4. Errors and Fixes:
+4. Files and Code Sections:
 [Fill in]
 
-5. Problem Solving:
+5. Errors and Fixes:
 [Fill in]
 
-6. All User Messages:
+6. Problem Solving:
 [Fill in]
 
-7. Pending Tasks:
+7. All User Messages:
 [Fill in]
 
-8. Current Work:
+8. Pending Tasks:
 [Fill in]
 
-9. Optional Next Step:
+9. Current Work:
+[Fill in]
+
+10. Optional Next Step:
 [Fill in]
 </summary>"""
 
@@ -133,23 +143,25 @@ PARTIAL_COMPACT_PROMPT_UP_TO = """Your task is to create a detailed summary of t
 
 Analyze the earlier messages and produce a structured summary with the following sections:
 
-1. **Primary Request and Intent**: The user's main goal in the earlier messages and what they were trying to accomplish. Be specific about their requirements and constraints.
+1. **Primary Request and Intent**: The user's main goal in the earlier messages and what they were trying to accomplish. Be specific about their requirements and constraints. If the user provided a specific task specification, test case steps, or operation checklist, you MUST preserve the core content of these specifications in full detail, including step numbers, operation targets, and key parameters.
 
-2. **Key Technical Concepts**: Technologies, frameworks, libraries, APIs, and key technical details relevant to the earlier messages. Include version numbers if mentioned.
+2. **Task Specification**: If the user provided a specific task specification, test case steps, or operation checklist, reproduce it here with as much detail as possible. Include step numbers, operation targets, expected results, and key parameters. If no specific task specification was provided, write 'N/A'.
 
-3. **Files and Code Sections**: List all files that were created, modified, or discussed in the earlier messages. For each file, describe what was changed and why. Include relevant code snippets or describe the key logic.
+3. **Key Technical Concepts**: Technologies, frameworks, libraries, APIs, and key technical details relevant to the earlier messages. Include version numbers if mentioned.
 
-4. **Errors and Fixes**: Any errors encountered in the earlier messages and how they were resolved. Include error messages and the solutions applied.
+4. **Files and Code Sections**: List all files that were created, modified, or discussed in the earlier messages. For each file, describe what was changed and why. Include relevant code snippets or describe the key logic.
 
-5. **Problem Solving**: Describe the problem-solving approach taken in the earlier messages. What strategies were tried, what worked, and what didn't. Include any debugging steps.
+5. **Errors and Fixes**: Any errors encountered in the earlier messages and how they were resolved. Include error messages and the solutions applied.
 
-6. **All User Messages**: A complete list of all user messages in the earlier portion, in order. Preserve the exact intent of each message.
+6. **Problem Solving**: Describe the problem-solving approach taken in the earlier messages. What strategies were tried, what worked, and what didn't. Include any debugging steps.
 
-7. **Pending Tasks**: Any tasks that were requested but not yet completed. Be specific about what remains to be done.
+7. **All User Messages**: A complete list of all user messages in the earlier portion, in order. Preserve the exact intent of each message. Pay special attention to preserving the content of the user's FIRST message, which contains the core task objective for the entire conversation.
 
-8. **Current Work**: What was being actively worked on in the earlier messages. Include the current state of any in-progress changes.
+8. **Pending Tasks**: Any tasks that were requested but not yet completed. Be specific about what remains to be done.
 
-9. **Context for Continuing Work**: Key context and decisions from these earlier messages that are needed to understand and continue the work in the preserved recent messages.
+9. **Current Work**: What was being actively worked on in the earlier messages. Include the current state of any in-progress changes.
+
+10. **Context for Continuing Work**: Key context and decisions from these earlier messages that are needed to understand and continue the work in the preserved recent messages.
 
 First, draft your analysis in an <analysis> block. Think through each section carefully, considering what information is essential for continuing the conversation. Then, produce your structured summary in a <summary> block.
 
@@ -161,28 +173,31 @@ First, draft your analysis in an <analysis> block. Think through each section ca
 1. Primary Request and Intent:
 [Fill in]
 
-2. Key Technical Concepts:
+2. Task Specification:
 [Fill in]
 
-3. Files and Code Sections:
+3. Key Technical Concepts:
 [Fill in]
 
-4. Errors and Fixes:
+4. Files and Code Sections:
 [Fill in]
 
-5. Problem Solving:
+5. Errors and Fixes:
 [Fill in]
 
-6. All User Messages:
+6. Problem Solving:
 [Fill in]
 
-7. Pending Tasks:
+7. All User Messages:
 [Fill in]
 
-8. Current Work:
+8. Pending Tasks:
 [Fill in]
 
-9. Context for Continuing Work:
+9. Current Work:
+[Fill in]
+
+10. Context for Continuing Work:
 [Fill in]
 </summary>"""
 

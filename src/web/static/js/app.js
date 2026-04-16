@@ -540,7 +540,7 @@ class App {
             }
             const sessions = await API.getSessions();
             const matching = sessions
-                .filter(s => s.role === agentName && s.parent_session_id)
+                .filter(s => s.role === agentName)
                 .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
             if (matching.length > 0) {
                 await this.loadSubAgentSessionById(matching[0].session_id, messagesEl);
@@ -553,7 +553,7 @@ class App {
     }
     
     extractSessionId(content) {
-        const match = content.match(/session[_\-]?id[:\s]*([a-f0-9\-]{8,})/i);
+        const match = content.match(/\[session_id:([a-f0-9\-]{36})\]/i);
         return match ? match[1] : null;
     }
     

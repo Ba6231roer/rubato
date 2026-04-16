@@ -953,7 +953,7 @@ class SubAgentManager:
                     "result_length": len(final_result) if final_result else 0
                 })
                 
-                return final_result
+                return f"{final_result}\n[session_id:{sub_agent.get_session_id()}]"
                 
             except asyncio.TimeoutError:
                 last_error = f"子智能体执行超时（{definition.execution.timeout}秒）"
@@ -973,7 +973,7 @@ class SubAgentManager:
             if attempt < definition.execution.max_retries:
                 await asyncio.sleep(1)
         
-        return f"错误：{last_error}，已重试{definition.execution.max_retries}次"
+        return f"错误：{last_error}，已重试{definition.execution.max_retries}次\n[session_id:{sub_agent.get_session_id()}]"
     
     async def _collect_query_result(
         self,
