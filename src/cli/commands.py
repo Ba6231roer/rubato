@@ -207,8 +207,43 @@ Skill管理：
             ]
             return "\n".join(lines)
         
+        elif sub_cmd == "load":
+            parts = args.split()
+            skill_names = parts[1:]
+            if not skill_names:
+                return "请指定Skill名称：/skill load <name> [<name2> ...]"
+            
+            loaded = []
+            already_loaded = []
+            not_found = []
+            
+            for name in skill_names:
+                if self.agent.context_manager.is_skill_loaded(name):
+                    already_loaded.append(name)
+                    continue
+                
+                if not self.skill_loader.has_skill(name):
+                    not_found.append(name)
+                    continue
+                
+                content = self.skill_loader.get_skill_content_sync(name)
+                self.agent._system_prompt_registry.add_skill(name, content)
+                self.agent._current_system_prompt = self.agent._system_prompt_registry.build()
+                self.agent._rebuild_query_engine()
+                self.agent.context_manager.mark_skill_loaded(name)
+                loaded.append(name)
+            
+            lines = []
+            if loaded:
+                lines.append(f"已加载Skill：{', '.join(loaded)}")
+            if already_loaded:
+                lines.append(f"已加载过，跳过：{', '.join(already_loaded)}")
+            if not_found:
+                lines.append(f"未找到Skill：{', '.join(not_found)}")
+            return "\n".join(lines)
+        
         else:
-            return "用法：/skill list | /skill show <name>"
+            return "用法：/skill list | show <name> | load <name> [<name2> ...]"
     
     def _format_tool_list(self, tools, desc_max_len: int = 50) -> str:
         if not tools:

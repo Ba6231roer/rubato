@@ -8,6 +8,9 @@ class App {
         this.knowledgeManager = null;
         this.testcaseManager = null;
         this.commands = [];
+        this.toolbarSkills = [];
+        this.toolbarSelectedSkills = new Set();
+        this.loadedSkillNames = new Set();
         
         this.elements = {
             configNav: document.getElementById('configNav'),
@@ -30,7 +33,12 @@ class App {
             sessionHistoryBtn: document.getElementById('session-history-btn'),
             sessionPanel: document.getElementById('session-panel'),
             sessionPanelClose: document.getElementById('session-panel-close'),
-            sessionList: document.getElementById('session-list')
+            sessionList: document.getElementById('session-list'),
+            chatToolbar: document.getElementById('chatToolbar'),
+            skillToolbarBtn: document.getElementById('skillToolbarBtn'),
+            skillDropdown: document.getElementById('skillDropdown'),
+            skillDropdownList: document.getElementById('skillDropdownList'),
+            skillConfirmBtn: document.getElementById('skillConfirmBtn')
         };
         
         this.init();
@@ -40,6 +48,7 @@ class App {
         this.initNavigation();
         this.initChat();
         this.initWebSocket();
+        this.initToolbar();
         this.initSidebarToggle();
         this.initSessionPanel();
         this.loadStatus();
@@ -259,6 +268,121 @@ class App {
             this.elements.sidebar.classList.add('collapsed');
             this.elements.sidebarToggle.title = '展开侧边栏';
         }
+    }
+    
+    initToolbar() {
+        if (this.elements.skillToolbarBtn) {
+            this.elements.skillToolbarBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleSkillDropdown();
+            });
+        }
+        if (this.elements.skillConfirmBtn) {
+            this.elements.skillConfirmBtn.addEventListener('click', () => {
+                this.loadSelectedSkills();
+            });
+        }
+        document.addEventListener('click', (e) => {
+            if (this.elements.skillDropdown && this.elements.skillDropdown.classList.contains('open')) {
+                if (!this.elements.skillDropdown.contains(e.target) && !this.elements.skillToolbarBtn.contains(e.target)) {
+                    this.closeSkillDropdown();
+                }
+            }
+        });
+    }
+    
+    toggleSkillDropdown() {
+        if (!this.elements.skillDropdown) return;
+        const isOpen = this.elements.skillDropdown.classList.contains('open');
+        if (isOpen) {
+            this.closeSkillDropdown();
+        } else {
+            this.openSkillDropdown();
+        }
+    }
+    
+    openSkillDropdown() {
+        if (!this.elements.skillDropdown) return;
+        this.renderSkillDropdownList();
+        this.elements.skillDropdown.classList.add('open');
+    }
+    
+    closeSkillDropdown() {
+        if (!this.elements.skillDropdown) return;
+        this.elements.skillDropdown.classList.remove('open');
+    }
+    
+    async renderSkillDropdownList() {
+        if (!this.elements.skillDropdownList) return;
+        try {
+            const skills = await API.getSkills();
+            this.toolbarSkills = skills;
+            this.elements.skillDropdownList.innerHTML = '';
+            skills.forEach(skill => {
+                const item = document.createElement('div');
+                item.className = 'skill-dropdown-item';
+                const isLoaded = this.loadedSkillNames.has(skill.name);
+                const isChecked = this.toolbarSelectedSkills.has(skill.name);
+                item.innerHTML = `
+                    <input type="checkbox" data-skill-name="${this.escapeHtml(skill.name)}" ${isChecked ? 'checked' : ''}>
+                    <div class="skill-dropdown-item-info">
+                        <span class="skill-dropdown-item-name">${this.escapeHtml(skill.name)}</span>
+                        <span class="skill-dropdown-item-desc">${this.escapeHtml(skill.description || '')}</span>
+                    </div>
+                    ${isLoaded ? '<span class="loaded-indicator">已加载</span>' : ''}
+                `;
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                checkbox.addEventListener('change', (e) => {
+                    if (e.target.checked) {
+                        this.toolbarSelectedSkills.add(skill.name);
+                    } else {
+                        this.toolbarSelectedSkills.delete(skill.name);
+                    }
+                    this.updateToolbarSelectedCount();
+                });
+                item.addEventListener('click', (e) => {
+                    if (e.target !== checkbox) {
+                        checkbox.checked = !checkbox.checked;
+                        checkbox.dispatchEvent(new Event('change'));
+                    }
+                });
+                this.elements.skillDropdownList.appendChild(item);
+            });
+        } catch (e) {
+            this.elements.skillDropdownList.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.8rem;">加载失败</div>';
+        }
+    }
+    
+    updateToolbarSelectedCount() {
+        if (!this.elements.skillToolbarBtn) return;
+        const countEl = this.elements.skillToolbarBtn.querySelector('.selected-count');
+        if (this.toolbarSelectedSkills.size > 0) {
+            if (countEl) {
+                countEl.textContent = this.toolbarSelectedSkills.size;
+            } else {
+                const span = document.createElement('span');
+                span.className = 'selected-count';
+                span.textContent = this.toolbarSelectedSkills.size;
+                this.elements.skillToolbarBtn.appendChild(span);
+            }
+        } else {
+            if (countEl) {
+                countEl.remove();
+            }
+        }
+    }
+    
+    loadSelectedSkills() {
+        if (this.toolbarSelectedSkills.size === 0) return;
+        const names = Array.from(this.toolbarSelectedSkills);
+        const command = `/skill load ${names.join(' ')}`;
+        this.toolbarSelectedSkills.clear();
+        this.updateToolbarSelectedCount();
+        this.closeSkillDropdown();
+        this.addUserMessage(command);
+        this.isCommandMode = true;
+        this.elements.sendBtn.disabled = true;
+        this.wsClient.send('task', command);
     }
     
     initChat() {
@@ -667,6 +791,8 @@ class App {
                 li.title = skill.description;
                 this.elements.skillsList.appendChild(li);
             });
+            
+            this.toolbarSkills = skills;
         } catch (error) {
             console.error('Failed to load skills:', error);
         }
@@ -788,6 +914,8 @@ class App {
             container.innerHTML = this.renderRoleSwitch(result);
         } else if (result.data.role_info) {
             container.innerHTML = this.renderRoleInfo(result.data.role_info);
+        } else if (result.data.loaded !== undefined) {
+            container.innerHTML = this.renderSkillLoadResult(result.data);
         } else if (result.data.skills) {
             container.innerHTML = this.renderSkillList(result.data.skills);
         } else if (result.data.tools) {
@@ -818,6 +946,21 @@ class App {
             return `<li><strong>${name}</strong>: ${desc}${triggers}</li>`;
         }).join('');
         return `<div class="result-list"><h4>可用Skills</h4><ul>${items}</ul></div>`;
+    }
+    
+    renderSkillLoadResult(data) {
+        const parts = [];
+        if (data.loaded && data.loaded.length > 0) {
+            data.loaded.forEach(name => this.loadedSkillNames.add(name));
+            parts.push(`<li style="color: var(--success-color);"><strong>已加载</strong>: ${data.loaded.join(', ')}</li>`);
+        }
+        if (data.already_loaded && data.already_loaded.length > 0) {
+            parts.push(`<li style="color: var(--text-muted);"><strong>已加载过，跳过</strong>: ${data.already_loaded.join(', ')}</li>`);
+        }
+        if (data.not_found && data.not_found.length > 0) {
+            parts.push(`<li style="color: var(--error-color);"><strong>未找到</strong>: ${data.not_found.join(', ')}</li>`);
+        }
+        return `<div class="result-list"><h4>Skill加载结果</h4><ul>${parts.join('')}</ul></div>`;
     }
     
     renderToolList(tools) {

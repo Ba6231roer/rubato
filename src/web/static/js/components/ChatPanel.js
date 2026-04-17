@@ -8,10 +8,16 @@ class ChatPanel {
         this.isStreaming = false;
         this.isCommandMode = false;
         this.currentAIMessage = null;
+        this.toolbarSkills = [];
+        this.toolbarSelectedSkills = new Set();
+        this.loadedSkillNames = new Set();
         
         this.messagesEl = null;
         this.inputEl = null;
         this.sendBtn = null;
+        this.toolbarEl = null;
+        this.skillDropdownEl = null;
+        this.skillDropdownListEl = null;
         
         this.render();
     }
@@ -24,6 +30,47 @@ class ChatPanel {
         this.messagesEl.className = 'chat-messages';
         
         this.showWelcome();
+        
+        this.toolbarEl = document.createElement('div');
+        this.toolbarEl.className = 'chat-toolbar';
+        
+        const skillBtn = document.createElement('button');
+        skillBtn.className = 'toolbar-btn skill-btn';
+        skillBtn.title = '选择Skill';
+        skillBtn.innerHTML = '<span class="toolbar-btn-icon">⚡</span><span class="toolbar-btn-text">Skill</span>';
+        skillBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleSkillDropdown();
+        });
+        
+        this.skillDropdownEl = document.createElement('div');
+        this.skillDropdownEl.className = 'skill-dropdown';
+        
+        const dropdownHeader = document.createElement('div');
+        dropdownHeader.className = 'skill-dropdown-header';
+        dropdownHeader.innerHTML = '<span>选择要加载的Skill</span>';
+        
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'skill-dropdown-confirm-btn';
+        confirmBtn.textContent = '加载选中';
+        confirmBtn.addEventListener('click', () => this.loadSelectedSkills());
+        dropdownHeader.appendChild(confirmBtn);
+        
+        this.skillDropdownListEl = document.createElement('div');
+        this.skillDropdownListEl.className = 'skill-dropdown-list';
+        
+        this.skillDropdownEl.appendChild(dropdownHeader);
+        this.skillDropdownEl.appendChild(this.skillDropdownListEl);
+        this.toolbarEl.appendChild(skillBtn);
+        this.toolbarEl.appendChild(this.skillDropdownEl);
+        
+        document.addEventListener('click', (e) => {
+            if (this.skillDropdownEl && this.skillDropdownEl.classList.contains('open')) {
+                if (!this.skillDropdownEl.contains(e.target) && !skillBtn.contains(e.target)) {
+                    this.closeSkillDropdown();
+                }
+            }
+        });
         
         const inputArea = document.createElement('div');
         inputArea.className = 'chat-input-area';
@@ -50,9 +97,104 @@ class ChatPanel {
         inputArea.appendChild(this.sendBtn);
         
         wrapper.appendChild(this.messagesEl);
+        wrapper.appendChild(this.toolbarEl);
         wrapper.appendChild(inputArea);
         
         this.container.appendChild(wrapper);
+    }
+    
+    toggleSkillDropdown() {
+        if (!this.skillDropdownEl) return;
+        if (this.skillDropdownEl.classList.contains('open')) {
+            this.closeSkillDropdown();
+        } else {
+            this.openSkillDropdown();
+        }
+    }
+    
+    openSkillDropdown() {
+        if (!this.skillDropdownEl) return;
+        this.renderSkillDropdownList();
+        this.skillDropdownEl.classList.add('open');
+    }
+    
+    closeSkillDropdown() {
+        if (!this.skillDropdownEl) return;
+        this.skillDropdownEl.classList.remove('open');
+    }
+    
+    async renderSkillDropdownList() {
+        if (!this.skillDropdownListEl) return;
+        try {
+            const skills = await API.getSkills();
+            this.toolbarSkills = skills;
+            this.skillDropdownListEl.innerHTML = '';
+            skills.forEach(skill => {
+                const item = document.createElement('div');
+                item.className = 'skill-dropdown-item';
+                const isLoaded = this.loadedSkillNames.has(skill.name);
+                const isChecked = this.toolbarSelectedSkills.has(skill.name);
+                item.innerHTML = `
+                    <input type="checkbox" data-skill-name="${this.escapeHtml(skill.name)}" ${isChecked ? 'checked' : ''}>
+                    <div class="skill-dropdown-item-info">
+                        <span class="skill-dropdown-item-name">${this.escapeHtml(skill.name)}</span>
+                        <span class="skill-dropdown-item-desc">${this.escapeHtml(skill.description || '')}</span>
+                    </div>
+                    ${isLoaded ? '<span class="loaded-indicator">已加载</span>' : ''}
+                `;
+                const checkbox = item.querySelector('input[type="checkbox"]');
+                checkbox.addEventListener('change', (e) => {
+                    if (e.target.checked) {
+                        this.toolbarSelectedSkills.add(skill.name);
+                    } else {
+                        this.toolbarSelectedSkills.delete(skill.name);
+                    }
+                    this.updateToolbarSelectedCount();
+                });
+                item.addEventListener('click', (e) => {
+                    if (e.target !== checkbox) {
+                        checkbox.checked = !checkbox.checked;
+                        checkbox.dispatchEvent(new Event('change'));
+                    }
+                });
+                this.skillDropdownListEl.appendChild(item);
+            });
+        } catch (e) {
+            this.skillDropdownListEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.8rem;">加载失败</div>';
+        }
+    }
+    
+    updateToolbarSelectedCount() {
+        const skillBtn = this.toolbarEl ? this.toolbarEl.querySelector('.skill-btn') : null;
+        if (!skillBtn) return;
+        const countEl = skillBtn.querySelector('.selected-count');
+        if (this.toolbarSelectedSkills.size > 0) {
+            if (countEl) {
+                countEl.textContent = this.toolbarSelectedSkills.size;
+            } else {
+                const span = document.createElement('span');
+                span.className = 'selected-count';
+                span.textContent = this.toolbarSelectedSkills.size;
+                skillBtn.appendChild(span);
+            }
+        } else {
+            if (countEl) countEl.remove();
+        }
+    }
+    
+    loadSelectedSkills() {
+        if (this.toolbarSelectedSkills.size === 0) return;
+        const names = Array.from(this.toolbarSelectedSkills);
+        const command = `/skill load ${names.join(' ')}`;
+        this.toolbarSelectedSkills.clear();
+        this.updateToolbarSelectedCount();
+        this.closeSkillDropdown();
+        this.addUserMessage(command);
+        this.isCommandMode = true;
+        this.sendBtn.disabled = true;
+        if (this.onSend) {
+            this.onSend(command);
+        }
     }
     
     showWelcome() {
