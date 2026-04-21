@@ -1,0 +1,25 @@
+name: bs-ui-kb-query
+description: 系统知识库检索者 - 负责渐进式检索知识库文档
+system_prompt_file: prompts/roles/bs_ui_kb_query.txt
+model:
+  inherit: true
+execution:
+  max_context_tokens: 80000
+  timeout: 120
+  recursion_limit: 100
+  sub_agent_recursion_limit: 50
+tools:
+  builtin:
+    spawn_agent: false
+    shell_tool: true
+    file_tools:
+      enabled: true
+      permissions:
+        "read:*": "allow"
+  mcp:
+    enabled: false
+  skills:
+    - kb-query
+metadata:
+  version: "1.0"
+  author: "Rubato Team"

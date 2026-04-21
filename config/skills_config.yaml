@@ -6,7 +6,7 @@ skills:
   enabled_skills:
     - test-execution
     - playwright-cli
-    - knowledge-query
+    - kb-query
   
   skill_loading:
     trigger_matching: true

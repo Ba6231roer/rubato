@@ -4,7 +4,7 @@ system_prompt_file: prompts/roles/bs_ui_kb_orchestrator.txt
 model:
   inherit: true
 execution:
-  max_context_tokens: 80000
+  max_context_tokens: 120000
   timeout: 300
   recursion_limit: 1000
   sub_agent_recursion_limit: 500
