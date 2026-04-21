@@ -1693,3 +1693,102 @@ body {
     background-color: var(--border-color);
     border-radius: 2px;
 }
+
+.role-dropdown {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 16px;
+    right: 16px;
+    max-width: 400px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
+    z-index: 100;
+    margin-bottom: 4px;
+}
+
+.role-dropdown.open {
+    display: block;
+}
+
+.role-dropdown-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.role-dropdown-list {
+    max-height: calc(36px * 5 + 4px);
+    overflow-y: auto;
+    padding: 2px 0;
+}
+
+.role-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+    transition: background-color 0.15s;
+    font-size: 0.8rem;
+}
+
+.role-dropdown-item:hover {
+    background-color: rgba(74, 144, 217, 0.08);
+}
+
+.role-dropdown-item.current {
+    background-color: rgba(40, 167, 69, 0.08);
+}
+
+.role-dropdown-item-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.role-dropdown-item-name {
+    color: var(--text-color);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.role-dropdown-item-desc {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.role-dropdown-item .current-indicator {
+    font-size: 0.65rem;
+    color: var(--success-color);
+    flex-shrink: 0;
+    padding: 1px 4px;
+    border: 1px solid var(--success-color);
+    border-radius: 3px;
+}
+
+.role-dropdown-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.role-dropdown-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.role-dropdown-list::-webkit-scrollbar-thumb {
+    background-color: var(--border-color);
+    border-radius: 2px;
+}

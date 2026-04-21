@@ -35,6 +35,11 @@ const API = {
         return response.json();
     },
     
+    async getRoles() {
+        const response = await fetch(`${this.baseUrl}/api/roles`);
+        return response.json();
+    },
+    
     async getTools() {
         const response = await fetch(`${this.baseUrl}/api/tools`);
         return response.json();

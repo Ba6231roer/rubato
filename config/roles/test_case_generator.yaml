@@ -28,6 +28,10 @@ tools:
         "write:*.md": "allow"
         "write:*.txt": "allow"
         "mkdir:*": "allow"
+  mcp:
+    enabled: false
+  skills:
+    - playwright-cli
 
 metadata:
   version: "1.0"

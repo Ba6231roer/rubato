@@ -37,6 +37,12 @@ class SkillInfo(BaseModel):
     triggers: List[str]
 
 
+class RoleInfo(BaseModel):
+    name: str
+    description: str
+    is_current: bool
+
+
 class ToolInfo(BaseModel):
     name: str
     description: str

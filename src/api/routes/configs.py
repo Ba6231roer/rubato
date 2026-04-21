@@ -5,7 +5,7 @@ import yaml
 
 from ..schemas import (
     ConfigInfo, ConfigContent, ConfigUpdateRequest, 
-    ConfigUpdateResponse, StatusResponse, SkillInfo, ToolInfo
+    ConfigUpdateResponse, StatusResponse, SkillInfo, ToolInfo, RoleInfo
 )
 
 router = APIRouter()
@@ -149,6 +149,27 @@ async def list_skills():
             ))
     
     return skills
+
+
+@router.get("/roles", response_model=List[RoleInfo])
+async def list_roles():
+    state = get_app_state()
+    roles = []
+    
+    if state and hasattr(state, 'role_manager') and state.role_manager:
+        current_role = state.role_manager.get_current_role()
+        current_name = current_role.name if current_role else None
+        
+        for role_name in state.role_manager.list_roles():
+            role = state.role_manager.get_role(role_name)
+            if role:
+                roles.append(RoleInfo(
+                    name=role_name,
+                    description=role.description,
+                    is_current=role_name == current_name
+                ))
+    
+    return roles
 
 
 @router.get("/tools", response_model=List[ToolInfo])

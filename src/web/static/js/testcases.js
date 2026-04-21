@@ -88,6 +88,8 @@ class TestCaseManager {
             placeholder: '输入任务描述...',
             onSend: (content) => this.handleTaskSend(content)
         });
+
+        this.chatPanel.selectRole('test-case-generator');
     }
     
     async selectFile(path) {

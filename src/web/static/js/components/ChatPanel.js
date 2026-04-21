@@ -11,6 +11,7 @@ class ChatPanel {
         this.toolbarSkills = [];
         this.toolbarSelectedSkills = new Set();
         this.loadedSkillNames = new Set();
+        this.currentRoleName = null;
         
         this.messagesEl = null;
         this.inputEl = null;
@@ -18,6 +19,8 @@ class ChatPanel {
         this.toolbarEl = null;
         this.skillDropdownEl = null;
         this.skillDropdownListEl = null;
+        this.roleDropdownEl = null;
+        this.roleDropdownListEl = null;
         
         this.render();
     }
@@ -33,6 +36,28 @@ class ChatPanel {
         
         this.toolbarEl = document.createElement('div');
         this.toolbarEl.className = 'chat-toolbar';
+        
+        const roleBtn = document.createElement('button');
+        roleBtn.className = 'toolbar-btn role-btn';
+        roleBtn.title = '选择角色';
+        roleBtn.innerHTML = '<span class="toolbar-btn-icon">🎭</span><span class="toolbar-btn-text">Role</span>';
+        roleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.toggleRoleDropdown();
+        });
+        
+        this.roleDropdownEl = document.createElement('div');
+        this.roleDropdownEl.className = 'role-dropdown';
+        
+        const roleDropdownHeader = document.createElement('div');
+        roleDropdownHeader.className = 'role-dropdown-header';
+        roleDropdownHeader.innerHTML = '<span>选择角色</span>';
+        
+        this.roleDropdownListEl = document.createElement('div');
+        this.roleDropdownListEl.className = 'role-dropdown-list';
+        
+        this.roleDropdownEl.appendChild(roleDropdownHeader);
+        this.roleDropdownEl.appendChild(this.roleDropdownListEl);
         
         const skillBtn = document.createElement('button');
         skillBtn.className = 'toolbar-btn skill-btn';
@@ -61,10 +86,17 @@ class ChatPanel {
         
         this.skillDropdownEl.appendChild(dropdownHeader);
         this.skillDropdownEl.appendChild(this.skillDropdownListEl);
+        this.toolbarEl.appendChild(roleBtn);
+        this.toolbarEl.appendChild(this.roleDropdownEl);
         this.toolbarEl.appendChild(skillBtn);
         this.toolbarEl.appendChild(this.skillDropdownEl);
         
         document.addEventListener('click', (e) => {
+            if (this.roleDropdownEl && this.roleDropdownEl.classList.contains('open')) {
+                if (!this.roleDropdownEl.contains(e.target) && !roleBtn.contains(e.target)) {
+                    this.closeRoleDropdown();
+                }
+            }
             if (this.skillDropdownEl && this.skillDropdownEl.classList.contains('open')) {
                 if (!this.skillDropdownEl.contains(e.target) && !skillBtn.contains(e.target)) {
                     this.closeSkillDropdown();
@@ -114,6 +146,7 @@ class ChatPanel {
     
     openSkillDropdown() {
         if (!this.skillDropdownEl) return;
+        this.closeRoleDropdown();
         this.renderSkillDropdownList();
         this.skillDropdownEl.classList.add('open');
     }
@@ -121,6 +154,64 @@ class ChatPanel {
     closeSkillDropdown() {
         if (!this.skillDropdownEl) return;
         this.skillDropdownEl.classList.remove('open');
+    }
+    
+    toggleRoleDropdown() {
+        if (!this.roleDropdownEl) return;
+        if (this.roleDropdownEl.classList.contains('open')) {
+            this.closeRoleDropdown();
+        } else {
+            this.openRoleDropdown();
+        }
+    }
+    
+    openRoleDropdown() {
+        if (!this.roleDropdownEl) return;
+        this.closeSkillDropdown();
+        this.renderRoleDropdownList();
+        this.roleDropdownEl.classList.add('open');
+    }
+    
+    closeRoleDropdown() {
+        if (!this.roleDropdownEl) return;
+        this.roleDropdownEl.classList.remove('open');
+    }
+    
+    async renderRoleDropdownList() {
+        if (!this.roleDropdownListEl) return;
+        try {
+            const roles = await API.getRoles();
+            this.roleDropdownListEl.innerHTML = '';
+            roles.forEach(role => {
+                const item = document.createElement('div');
+                item.className = 'role-dropdown-item';
+                if (role.is_current) {
+                    item.classList.add('current');
+                }
+                item.innerHTML = `
+                    <div class="role-dropdown-item-info">
+                        <span class="role-dropdown-item-name">${this.escapeHtml(role.name)}</span>
+                        <span class="role-dropdown-item-desc">${this.escapeHtml(role.description || '')}</span>
+                    </div>
+                    ${role.is_current ? '<span class="current-indicator">当前</span>' : ''}
+                `;
+                item.addEventListener('click', () => this.selectRole(role.name));
+                this.roleDropdownListEl.appendChild(item);
+            });
+        } catch (e) {
+            this.roleDropdownListEl.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-muted);font-size:0.8rem;">加载失败</div>';
+        }
+    }
+    
+    selectRole(name) {
+        this.closeRoleDropdown();
+        this.currentRoleName = name;
+        this.addUserMessage('/role ' + name);
+        this.isCommandMode = true;
+        this.sendBtn.disabled = true;
+        if (this.onSend) {
+            this.onSend('/role ' + name);
+        }
     }
     
     async renderSkillDropdownList() {
