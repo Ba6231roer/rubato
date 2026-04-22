@@ -3,8 +3,7 @@ class App {
         this.configEditor = new ConfigEditor();
         this.wsClient = null;
         this.currentView = 'chat';
-        this.knowledgeManager = null;
-        this.testcaseManager = null;
+        this.workspaceManager = null;
         this.chatPanel = null;
         this.chatInitialized = false;
         this.commands = [];
@@ -12,8 +11,7 @@ class App {
         this.elements = {
             configNav: document.getElementById('configNav'),
             configView: document.getElementById('configView'),
-            knowledgeView: document.getElementById('knowledgeView'),
-            testcasesView: document.getElementById('testcasesView'),
+            workspaceView: document.getElementById('workspaceView'),
             scenariosView: document.getElementById('scenariosView'),
             execsetsView: document.getElementById('execsetsView'),
             chatView: document.getElementById('chatView'),
@@ -162,8 +160,7 @@ class App {
 
     hideAllViews() {
         this.elements.configView.classList.add('hidden');
-        this.elements.knowledgeView.classList.add('hidden');
-        this.elements.testcasesView.classList.add('hidden');
+        this.elements.workspaceView.classList.add('hidden');
         this.elements.scenariosView.classList.add('hidden');
         this.elements.execsetsView.classList.add('hidden');
         this.elements.chatView.classList.add('hidden');
@@ -181,21 +178,13 @@ class App {
         this.hideAllViews();
 
         switch(viewName) {
-            case 'knowledge':
+            case 'workspace':
                 this.collapseSidebar();
-                this.elements.knowledgeView.classList.remove('hidden');
-                if (!this.knowledgeManager) {
-                    this.knowledgeManager = new KnowledgeManager();
+                this.elements.workspaceView.classList.remove('hidden');
+                if (!this.workspaceManager) {
+                    this.workspaceManager = new WorkspaceManager();
                 }
-                this.knowledgeManager.init();
-                break;
-            case 'testcases':
-                this.collapseSidebar();
-                this.elements.testcasesView.classList.remove('hidden');
-                if (!this.testcaseManager) {
-                    this.testcaseManager = new TestCaseManager();
-                }
-                this.testcaseManager.init();
+                this.workspaceManager.init();
                 break;
             case 'scenarios':
                 this.elements.scenariosView.classList.remove('hidden');
@@ -241,13 +230,8 @@ class App {
     }
 
     handleWSMessage(data) {
-        if (this.currentView === 'knowledge' && this.knowledgeManager) {
-            this.knowledgeManager.handleWSMessage(data);
-            return;
-        }
-
-        if (this.currentView === 'testcases' && this.testcaseManager) {
-            this.testcaseManager.handleWSMessage(data);
+        if (this.currentView === 'workspace' && this.workspaceManager) {
+            this.workspaceManager.handleWSMessage(data);
             return;
         }
 
@@ -287,6 +271,16 @@ class App {
             case 'interrupted':
                 this.chatPanel.finishAIMessage();
                 break;
+            case 'context_compressed':
+                if (data.content) {
+                    this.chatPanel.addCompressionNotice(data.content);
+                }
+                break;
+            case 'user_message_resolved':
+                if (data.content) {
+                    this.chatPanel.updateLastUserMessage(data.content);
+                }
+                break;
         }
     }
 
@@ -296,16 +290,10 @@ class App {
                 this.chatPanel.appendAIMessage(msg.content);
             }
             if (msg.tool_calls) {
-                msg.tool_calls.forEach(tc => {
-                    const summary = this.getArgsSummary(tc.args);
-                    this.chatPanel.appendAIMessage(`\n🔧 ${tc.name}: ${summary}\n`);
-                });
+                this.chatPanel.appendToolCalls(msg.tool_calls);
             }
         } else if (msg.role === 'tool') {
-            const resultContent = msg.content.length > 200
-                ? msg.content.substring(0, 200) + '...'
-                : msg.content;
-            this.chatPanel.appendAIMessage(`\n📋 ${msg.name}: ${resultContent}\n`);
+            this.chatPanel.appendToolResult(msg);
         }
     }
 

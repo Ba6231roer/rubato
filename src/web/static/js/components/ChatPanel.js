@@ -12,6 +12,7 @@ class ChatPanel {
         this.toolbarSelectedSkills = new Set();
         this.loadedSkillNames = new Set();
         this.currentRoleName = null;
+        this.fileReferences = [];
         
         this.messagesEl = null;
         this.inputEl = null;
@@ -21,6 +22,7 @@ class ChatPanel {
         this.skillDropdownListEl = null;
         this.roleDropdownEl = null;
         this.roleDropdownListEl = null;
+        this.fileRefsEl = null;
         
         this.render();
     }
@@ -117,10 +119,34 @@ class ChatPanel {
         this.sendBtn.textContent = '发送';
         
         this.inputEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && this.inputEl.selectionStart === 0 && this.inputEl.selectionEnd === 0) {
+                if (this.removeLastFileReference()) {
+                    e.preventDefault();
+                    return;
+                }
+            }
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 this.send();
             }
+        });
+        
+        this.inputEl.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.inputEl.classList.add('drag-over');
+        });
+        
+        this.inputEl.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            this.inputEl.classList.remove('drag-over');
+        });
+        
+        this.inputEl.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.inputEl.classList.remove('drag-over');
+            this.handleFileDrop(e);
         });
         
         this.sendBtn.addEventListener('click', () => this.send());
@@ -130,6 +156,11 @@ class ChatPanel {
         
         wrapper.appendChild(this.messagesEl);
         wrapper.appendChild(this.toolbarEl);
+        
+        this.fileRefsEl = document.createElement('div');
+        this.fileRefsEl.className = 'file-refs-container';
+        wrapper.appendChild(this.fileRefsEl);
+        
         wrapper.appendChild(inputArea);
         
         this.container.appendChild(wrapper);
@@ -303,23 +334,85 @@ class ChatPanel {
             return;
         }
         const content = this.inputEl.value.trim();
-        if (!content) return;
+        if (!content && this.fileReferences.length === 0) return;
         
-        this.addUserMessage(content);
+        let fullContent = content;
+        if (this.fileReferences.length > 0) {
+            const fileRefs = this.fileReferences.map(ref => `@${ref.path}`).join(' ');
+            fullContent = fileRefs + (content ? ' ' + content : '');
+        }
+        
+        this.addUserMessage(fullContent);
         this.inputEl.value = '';
+        this.fileReferences = [];
+        this.renderFileReferences();
         
         if (this.onSend) {
-            if (content.startsWith('/')) {
+            if (fullContent.startsWith('/')) {
                 this.isCommandMode = true;
                 this.sendBtn.disabled = true;
-                this.onSend(content);
+                this.onSend(fullContent);
             } else {
                 this.isStreaming = true;
                 this.sendBtn.disabled = true;
                 this.createAIMessage();
-                this.onSend(content);
+                this.onSend(fullContent);
             }
         }
+    }
+    
+    _normalizeFilePath(filePath) {
+        let normalized = filePath.replace(/\\/g, '/');
+        if (!normalized.startsWith('workspace/')) {
+            normalized = 'workspace/' + normalized;
+        }
+        return normalized;
+    }
+
+    handleFileDrop(e) {
+        const rawPath = e.dataTransfer.getData('text/plain');
+        if (!rawPath) return;
+        
+        const filePath = this._normalizeFilePath(rawPath);
+        const fileName = filePath.split('/').pop();
+        if (this.fileReferences.some(ref => ref.path === filePath)) return;
+        
+        this.fileReferences.push({ path: filePath, name: fileName });
+        this.renderFileReferences();
+    }
+    
+    addFileReference(rawPath) {
+        const filePath = this._normalizeFilePath(rawPath);
+        const fileName = filePath.split('/').pop();
+        if (this.fileReferences.some(ref => ref.path === filePath)) return;
+        this.fileReferences.push({ path: filePath, name: fileName });
+        this.renderFileReferences();
+    }
+    
+    renderFileReferences() {
+        if (!this.fileRefsEl) return;
+        this.fileRefsEl.innerHTML = '';
+        this.fileReferences.forEach((ref, index) => {
+            const chip = document.createElement('span');
+            chip.className = 'file-ref-chip';
+            chip.textContent = ref.name;
+            chip.dataset.index = index;
+            chip.title = ref.path;
+            chip.addEventListener('click', () => {
+                this.fileReferences.splice(index, 1);
+                this.renderFileReferences();
+            });
+            this.fileRefsEl.appendChild(chip);
+        });
+    }
+    
+    removeLastFileReference() {
+        if (this.fileReferences.length > 0 && this.inputEl.selectionStart === 0) {
+            this.fileReferences.pop();
+            this.renderFileReferences();
+            return true;
+        }
+        return false;
     }
     
     stopTask() {
@@ -362,7 +455,7 @@ class ChatPanel {
         
         const contentEl = this.currentAIMessage.querySelector('.message-content');
         if (contentEl) {
-            contentEl.textContent += content;
+            contentEl.appendChild(document.createTextNode(content));
             this.scrollToBottom();
         }
     }
@@ -385,6 +478,192 @@ class ChatPanel {
         this.sendBtn.classList.add('btn-primary');
     }
     
+    appendToolCalls(toolCalls) {
+        if (!this.currentAIMessage) return;
+        const contentEl = this.currentAIMessage.querySelector('.message-content');
+        if (!contentEl) return;
+        toolCalls.forEach(tc => {
+            if (tc.name === 'spawn_agent') {
+                this.appendSubAgentCall(contentEl, tc);
+            } else {
+                const argsStr = JSON.stringify(tc.args, null, 2);
+                const argsSummary = this.getArgsSummary(tc.args);
+                const div = document.createElement('div');
+                div.className = 'tool-call collapsed';
+                div.dataset.toolCallId = tc.id;
+                div.innerHTML = `
+                    <div class="tool-call-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span class="tool-call-icon">▶</span>
+                        <span class="tool-call-name">${this.escapeHtml(tc.name)}</span>
+                        <span class="tool-call-args-summary">${this.escapeHtml(argsSummary)}</span>
+                    </div>
+                    <div class="tool-call-body">
+                        <pre>${this.escapeHtml(argsStr)}</pre>
+                    </div>
+                `;
+                contentEl.appendChild(div);
+            }
+        });
+        this.scrollToBottom();
+    }
+
+    appendToolResult(msg) {
+        if (!this.currentAIMessage) return;
+        const contentEl = this.currentAIMessage.querySelector('.message-content');
+        if (!contentEl) return;
+        if (msg.name === 'spawn_agent') {
+            this.appendSubAgentResult(contentEl, msg);
+            return;
+        }
+        const toolCallEl = contentEl.querySelector(`.tool-call[data-tool-call-id="${msg.tool_call_id}"]`);
+        const resultContent = msg.content.length > 500
+            ? msg.content.substring(0, 500) + '...'
+            : msg.content;
+        const resultDiv = document.createElement('div');
+        resultDiv.className = 'tool-result';
+        resultDiv.dataset.toolCallId = msg.tool_call_id;
+        resultDiv.innerHTML = `
+            <div class="tool-result-header">结果: ${this.escapeHtml(msg.name)}</div>
+            <pre class="tool-result-content">${this.escapeHtml(resultContent)}</pre>
+        `;
+        if (toolCallEl) {
+            toolCallEl.after(resultDiv);
+        } else {
+            contentEl.appendChild(resultDiv);
+        }
+        this.scrollToBottom();
+    }
+
+    getArgsSummary(args) {
+        if (!args || typeof args !== 'object') return '';
+        const keys = Object.keys(args);
+        if (keys.length === 0) return '';
+        const first = keys[0];
+        const val = args[first];
+        const valStr = typeof val === 'string' ? val : JSON.stringify(val);
+        const truncated = valStr.length > 30 ? valStr.substring(0, 30) + '...' : valStr;
+        return `${first}: ${truncated}`;
+    }
+
+    appendSubAgentCall(contentEl, tc) {
+        const agentName = tc.args && tc.args.agent_name ? tc.args.agent_name : 'unknown';
+        const task = tc.args && tc.args.task ? tc.args.task : '';
+        const taskSummary = task.length > 50 ? task.substring(0, 50) + '...' : task;
+        const div = document.createElement('div');
+        div.className = 'sub-agent-call collapsed';
+        div.dataset.toolCallId = tc.id;
+        div.dataset.agentName = agentName;
+        div.innerHTML = `
+            <div class="sub-agent-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span class="sub-agent-icon">▶</span>
+                <span class="sub-agent-name">🤖 ${this.escapeHtml(agentName)}</span>
+                <span class="sub-agent-task">${this.escapeHtml(taskSummary)}</span>
+                <span class="sub-agent-status">执行中...</span>
+            </div>
+            <div class="sub-agent-body">
+                <div class="sub-agent-messages"></div>
+            </div>
+        `;
+        contentEl.appendChild(div);
+    }
+
+    appendSubAgentResult(contentEl, msg) {
+        const subAgentEl = contentEl.querySelector(`.sub-agent-call[data-tool-call-id="${msg.tool_call_id}"]`);
+        if (subAgentEl) {
+            const statusEl = subAgentEl.querySelector('.sub-agent-status');
+            statusEl.textContent = '已完成';
+            statusEl.classList.add('completed');
+            this.tryLoadSubAgentSession(subAgentEl, msg);
+        } else {
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'tool-result';
+            resultDiv.dataset.toolCallId = msg.tool_call_id;
+            resultDiv.innerHTML = `
+                <div class="tool-result-header">结果: spawn_agent</div>
+                <pre class="tool-result-content">${this.escapeHtml(msg.content.length > 500 ? msg.content.substring(0, 500) + '...' : msg.content)}</pre>
+            `;
+            contentEl.appendChild(resultDiv);
+        }
+        this.scrollToBottom();
+    }
+
+    async tryLoadSubAgentSession(subAgentEl, msg) {
+        const agentName = subAgentEl.dataset.agentName;
+        const messagesEl = subAgentEl.querySelector('.sub-agent-messages');
+        try {
+            const sessionId = this.extractSessionId(msg.content);
+            if (sessionId) {
+                await this.loadSubAgentSessionById(sessionId, messagesEl);
+                return;
+            }
+            const sessions = await API.getSessions();
+            const matching = sessions
+                .filter(s => s.role === agentName && s.parent_session_id)
+                .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+            if (matching.length > 0) {
+                await this.loadSubAgentSessionById(matching[0].session_id, messagesEl);
+                return;
+            }
+            messagesEl.innerHTML = '<div class="sub-msg system">会话详情暂不可用</div>';
+        } catch (e) {
+            messagesEl.innerHTML = '<div class="sub-msg system">内容加载失败</div>';
+        }
+    }
+
+    extractSessionId(content) {
+        const match = content.match(/session[_\-]?id[:\s]*([a-f0-9\-]{8,})/i);
+        return match ? match[1] : null;
+    }
+
+    async loadSubAgentSessionById(sessionId, messagesEl) {
+        const detail = await API.getSession(sessionId);
+        if (detail && detail.messages) {
+            this.renderSubAgentMessages(messagesEl, detail.messages);
+        } else {
+            messagesEl.innerHTML = '<div class="sub-msg system">无消息内容</div>';
+        }
+    }
+
+    renderSubAgentMessages(container, messages) {
+        container.innerHTML = '';
+        messages.forEach(msg => {
+            const div = document.createElement('div');
+            if (msg.type === 'human' || msg.role === 'user') {
+                div.className = 'sub-msg user';
+                div.textContent = msg.content || '';
+            } else if (msg.type === 'ai' || msg.role === 'assistant') {
+                div.className = 'sub-msg assistant';
+                div.textContent = msg.content || '';
+            } else if (msg.type === 'tool' || msg.role === 'tool') {
+                div.className = 'sub-msg tool-call';
+                div.textContent = '🔧 ' + (msg.name || msg.tool_name || 'tool');
+            } else if (msg.type === 'system' || msg.role === 'system') {
+                return;
+            } else {
+                div.className = 'sub-msg';
+                div.textContent = msg.content || '';
+            }
+            container.appendChild(div);
+        });
+        if (!container.children.length) {
+            container.innerHTML = '<div class="sub-msg system">无消息内容</div>';
+        }
+    }
+
+    updateLastUserMessage(content) {
+        const userMessages = this.messagesEl.querySelectorAll('.message.user');
+        if (userMessages.length === 0) return;
+        const lastUserMsg = userMessages[userMessages.length - 1];
+        const contentEl = lastUserMsg.querySelector('.message-content');
+        if (contentEl) {
+            contentEl.textContent = content;
+        }
+        const lastMsg = this.messages.filter(m => m.type === 'user').pop();
+        if (lastMsg) {
+            lastMsg.content = content;
+        }
+    }
+
     addCommandResult(content, isHtml) {
         const msgEl = document.createElement('div');
         msgEl.className = 'message ai';
@@ -413,6 +692,20 @@ class ChatPanel {
         }
     }
     
+    addCompressionNotice(data) {
+        const msgEl = document.createElement('div');
+        msgEl.className = 'message system';
+        const originalCount = data.original_count || '?';
+        const compressedCount = data.compressed_count || '?';
+        msgEl.innerHTML = `
+            <div class="message-header">系统</div>
+            <div class="message-content compression-notice">⚠️ 上下文已压缩（压缩前${originalCount}条消息 → 压缩后${compressedCount}条消息）</div>
+        `;
+        this.messagesEl.appendChild(msgEl);
+        this.messages.push({ type: 'system', content: '上下文已压缩' });
+        this.scrollToBottom();
+    }
+
     addMessage(content, type = 'user') {
         if (type === 'user') {
             this.addUserMessage(content);

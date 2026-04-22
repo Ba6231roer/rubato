@@ -36,6 +36,13 @@ class Console:
             agent_pool=self.app_state.agent_pool if self.app_state else None
         )
         self.dispatcher = CommandDispatcher(context)
+
+        def _on_compression(info):
+            original = info.get("original_count", "?")
+            compressed = info.get("compressed_count", "?")
+            print(f"\n⚠️ 上下文已压缩（压缩前{original}条消息 → 压缩后{compressed}条消息）")
+
+        agent.set_compression_callback(_on_compression)
     
     def _print_banner(self) -> None:
         """打印欢迎横幅"""

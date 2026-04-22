@@ -185,22 +185,22 @@ class TestSessionsEndpoint:
             assert data["success"] is False
 
 
-class TestTestcasesEndpoint:
+class TestWorkspaceEndpoint:
     @pytest.mark.asyncio
-    async def test_get_testcase_tree_no_path(self, client):
-        with patch("src.api.routes.testcases.get_test_case_path") as mock_path:
+    async def test_get_workspace_tree_no_path(self, client):
+        with patch("src.api.routes.workspace.get_workspace_path") as mock_path:
             from pathlib import Path
             mock_path.return_value = Path("/nonexistent_dir_xyz")
-            response = await client.get("/api/testcases/tree")
+            response = await client.get("/api/workspace/tree")
             assert response.status_code == 200
             assert response.json() == []
 
     @pytest.mark.asyncio
-    async def test_get_testcase_file_not_found(self, client):
-        with patch("src.api.routes.testcases.get_test_case_path") as mock_path:
+    async def test_get_workspace_file_not_found(self, client):
+        with patch("src.api.routes.workspace.get_workspace_path") as mock_path:
             from pathlib import Path
             mock_path.return_value = Path("/nonexistent_dir_xyz")
-            response = await client.get("/api/testcases/file", params={"path": "test.md"})
+            response = await client.get("/api/workspace/file", params={"path": "test.md"})
             assert response.status_code == 404
 
 

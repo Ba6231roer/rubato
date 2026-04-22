@@ -1792,3 +1792,49 @@ body {
     background-color: var(--border-color);
     border-radius: 2px;
 }
+
+.message.system .message-content {
+    background: rgba(240, 173, 78, 0.1);
+    border-left: 3px solid #f0ad4e;
+    padding: 8px 12px;
+}
+
+.compression-notice {
+    color: #f0ad4e;
+    font-style: italic;
+    font-size: 0.875rem;
+}
+
+.file-refs-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px;
+    min-height: 0;
+}
+
+.file-refs-container:empty {
+    display: none;
+}
+
+.file-ref-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    background: var(--primary-color);
+    color: #fff;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.file-ref-chip:hover {
+    background: var(--primary-hover);
+    text-decoration: line-through;
+}
+
+.chat-input.drag-over {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.3);
+}

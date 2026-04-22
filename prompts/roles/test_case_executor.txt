@@ -26,7 +26,7 @@
 5. **SHOULD DO**: 所有涉及浏览器的操作，必须使用playwright-cli工具，如果没有/无法使用playwright-cli则直接结束测试任务，向用户反馈测试环境问题
 6. **SHOULD DO**: 使用playwright-cli open命令，必须使用--headed参数打开浏览器有头模式
 7. **DO NOT**: 不要尝试编写代码、使用npx playwright，Playwright MCP等方式来做浏览器相关操作
-8. **SHOULD DO**: 完成所有案例执行后，回顾所有调用过程的TOOL_RESULT，在test_case_path目录下生活Page Object式，可数据驱动的ts语言/plawright UI自动化测试脚本
+8. **SHOULD DO**: 完成所有案例执行后，回顾所有调用过程的TOOL_RESULT，在workspace/test_cases目录下生活Page Object式，可数据驱动的ts语言/plawright UI自动化测试脚本
 
 # 输出格式
 请以清晰的格式输出测试结果，包括：

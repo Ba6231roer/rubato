@@ -283,6 +283,7 @@ class QueryEngine:
         self.logging_config = config.logging_config
 
         self._task_intent_manager: Optional[TaskIntentManager] = None
+        self._on_context_compressed: Optional[Callable[[dict], None]] = None
         if config.task_intent_protection_enabled and self._compression_enabled:
             session_dir = os.path.join(config.cwd, ".rubato", "sessions", self._session_id)
             self._task_intent_manager = TaskIntentManager(
@@ -449,7 +450,16 @@ class QueryEngine:
                     "message_count": len(self.mutable_messages)
                 })
 
-            await self._run_compression_pipeline()
+            compression_info = await self._run_compression_pipeline()
+            if compression_info.get("compressed"):
+                yield SDKMessage(
+                    type="context_compressed",
+                    content={
+                        "original_count": compression_info["original_count"],
+                        "compressed_count": compression_info["compressed_count"],
+                    },
+                    metadata={"session_id": self._session_id}
+                )
 
             if self._compressor is not None:
                 estimated_tokens = self._compressor.estimate_tokens(self.mutable_messages)
@@ -737,9 +747,9 @@ class QueryEngine:
         warning_state = self._compressor.calculate_token_warning_state(estimated_tokens)
         return warning_state.get("is_at_blocking_limit", False)
 
-    async def _run_compression_pipeline(self) -> None:
+    async def _run_compression_pipeline(self) -> Dict[str, Any]:
         if not self._compression_enabled or self._compressor is None:
-            return
+            return {"compressed": False}
 
         if self.system_prompt_registry is not None:
             self.system_prompt_registry.remove_stale_skills(self.skill_stale_timeout_seconds)
@@ -764,8 +774,17 @@ class QueryEngine:
                     "original_message_count": original_len,
                     "compressed_message_count": len(self.mutable_messages),
                 })
+            if self._on_context_compressed:
+                self._on_context_compressed({
+                    "compressed": True,
+                    "original_count": original_len,
+                    "compressed_count": len(self.mutable_messages),
+                })
+            return {"compressed": True, "original_count": original_len, "compressed_count": len(self.mutable_messages)}
         elif messages is not self.mutable_messages:
             self.mutable_messages = messages
+
+        return {"compressed": False}
 
     def _handle_compact_boundary(self) -> None:
         if self._compressor is None:
@@ -927,6 +946,9 @@ class QueryEngine:
             "reason": reason
         })
     
+    def set_compression_callback(self, callback: Callable[[dict], None]) -> None:
+        self._on_context_compressed = callback
+
     def clear_messages(self) -> None:
         self.mutable_messages.clear()
         self._session_id = str(uuid.uuid4())

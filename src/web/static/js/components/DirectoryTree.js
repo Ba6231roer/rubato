@@ -5,30 +5,30 @@ class DirectoryTree {
         this.loadTreeFn = options.loadTreeFn;
         this.onFileSelect = options.onFileSelect;
         this.onFolderToggle = options.onFolderToggle || null;
-        
+
         this.tree = [];
         this.currentFile = null;
         this.treeEl = null;
-        
+
         this.render();
     }
-    
+
     render() {
         const wrapper = document.createElement('div');
         wrapper.className = 'directory-tree-wrapper';
-        
+
         this.treeEl = document.createElement('div');
         this.treeEl.className = 'directory-tree';
-        
+
         wrapper.appendChild(this.treeEl);
         this.container.appendChild(wrapper);
-        
+
         this.loadTree();
     }
-    
+
     async loadTree() {
         if (!this.loadTreeFn) return;
-        
+
         try {
             this.tree = await this.loadTreeFn();
             this.renderTree();
@@ -37,7 +37,7 @@ class DirectoryTree {
             this.treeEl.innerHTML = '<div class="tree-error">加载目录失败</div>';
         }
     }
-    
+
     renderTree() {
         if (!this.tree || this.tree.length === 0) {
             this.treeEl.innerHTML = '<div class="tree-empty">暂无内容</div>';
@@ -46,8 +46,15 @@ class DirectoryTree {
         this.treeEl.innerHTML = this.renderTreeNodes(this.tree);
         this.bindEvents();
     }
-    
+
     renderTreeNodes(nodes) {
+        const FILE_ICONS = {
+            'text': '📄',
+            'document': '📘',
+            'presentation': '📙',
+            'spreadsheet': '📊',
+            'pdf': '📕'
+        };
         let html = '';
         for (const node of nodes) {
             if (node.type === 'folder') {
@@ -63,9 +70,10 @@ class DirectoryTree {
                     </div>
                 `;
             } else {
+                const icon = FILE_ICONS[node.file_type] || '📄';
                 html += `
-                    <div class="tree-item file" data-path="${this.escapeAttr(node.path)}" data-type="file">
-                        <span class="tree-icon">📄</span>
+                    <div class="tree-item file" data-path="${this.escapeAttr(node.path)}" data-type="file" data-file-type="${node.file_type || 'text'}" draggable="true">
+                        <span class="tree-icon">${icon}</span>
                         <span class="tree-text">${this.escapeHtml(node.name)}</span>
                     </div>
                 `;
@@ -83,6 +91,14 @@ class DirectoryTree {
                 this.toggleFolder(folderItem.parentElement);
             } else if (fileItem) {
                 this.selectFile(fileItem);
+            }
+        });
+
+        this.treeEl.addEventListener('dragstart', (e) => {
+            const fileItem = e.target.closest('.tree-item.file');
+            if (fileItem) {
+                e.dataTransfer.setData('text/plain', fileItem.dataset.path);
+                e.dataTransfer.effectAllowed = 'copy';
             }
         });
     }

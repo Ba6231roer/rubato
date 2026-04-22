@@ -2,6 +2,8 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import List, Optional
 import json
 import asyncio
+import re
+from pathlib import Path
 
 from .schemas import WSMessage
 from ..commands import CommandDispatcher, CommandContext
@@ -163,6 +165,42 @@ async def handle_stop(websocket: WebSocket):
     })
 
 
+async def _resolve_file_references(content: str) -> str:
+    pattern = r'@(workspace[/\\][^\s]+)'
+    matches = re.findall(pattern, content)
+    
+    if not matches:
+        return content
+    
+    from ..tools.file_converter import is_text_based, convert_to_text
+    
+    resolved_parts = []
+    remaining = content
+    
+    for match in matches:
+        file_ref = f"@{match}"
+        file_path = match.replace('\\', '/')
+        
+        path = Path(file_path)
+        if not path.exists():
+            resolved_parts.append(f"@{file_path}: [文件不存在]")
+            remaining = remaining.replace(file_ref, '', 1)
+            continue
+        
+        try:
+            text_content = convert_to_text(str(path))
+            resolved_parts.append(f"@{file_path}: {text_content}")
+            remaining = remaining.replace(file_ref, '', 1)
+        except Exception as e:
+            resolved_parts.append(f"@{file_path}: [文件读取失败: {str(e)}]")
+            remaining = remaining.replace(file_ref, '', 1)
+    
+    if resolved_parts:
+        file_lines = '  \n'.join(resolved_parts) + '  '
+        return file_lines + '\n\n' + remaining.strip()
+    return remaining
+
+
 async def handle_task(websocket: WebSocket, task_content: str):
     global _current_task
     state = get_app_state()
@@ -181,11 +219,25 @@ async def handle_task(websocket: WebSocket, task_content: str):
         })
         return
     
+    resolved_content = await _resolve_file_references(task_content)
+    
+    if resolved_content != task_content:
+        await manager.send_message(websocket, {
+            "type": "user_message_resolved",
+            "content": resolved_content
+        })
+    
     async def run_task():
         try:
             full_response = ""
             
-            async for sdk_msg in state.agent.run_stream_structured(task_content):
+            async for sdk_msg in state.agent.run_stream_structured(resolved_content):
+                if sdk_msg.type == "context_compressed":
+                    await manager.send_message(websocket, {
+                        "type": "context_compressed",
+                        "content": sdk_msg.content
+                    })
+                    continue
                 message = _sdk_message_to_structured(sdk_msg)
                 await manager.send_message(websocket, {
                     "type": "chunk",
@@ -241,5 +293,12 @@ def _sdk_message_to_structured(sdk_msg) -> dict:
     elif sdk_msg.type == "interrupt":
         reason = sdk_msg.content.get("reason", "") if isinstance(sdk_msg.content, dict) else str(sdk_msg.content)
         return {"role": "assistant", "content": f"[中断: {reason}]", "streaming": True}
+    elif sdk_msg.type == "context_compressed":
+        return {
+            "role": "system",
+            "type": "context_compressed",
+            "content": sdk_msg.content,
+            "streaming": False
+        }
     else:
         return {"role": "assistant", "content": str(sdk_msg.content), "streaming": True}

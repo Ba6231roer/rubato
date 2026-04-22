@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from pathlib import Path
 
 from .routes import configs
-from .routes import testcases
+from .routes import workspace
 from .routes import commands
 from .routes import sessions
 from .websocket import websocket_router
@@ -27,7 +27,7 @@ def create_app() -> FastAPI:
     )
     
     app.include_router(configs.router, prefix="/api")
-    app.include_router(testcases.router, prefix="/api")
+    app.include_router(workspace.router, prefix="/api")
     app.include_router(commands.router, prefix="/api")
     app.include_router(sessions.router, prefix="/api")
     app.include_router(websocket_router)

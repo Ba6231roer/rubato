@@ -45,21 +45,21 @@ const API = {
         return response.json();
     },
     
-    async getTestCaseTree() {
-        const response = await fetch(`${this.baseUrl}/api/testcases/tree`);
+    async getWorkspaceTree() {
+        const response = await fetch(`${this.baseUrl}/api/workspace/tree`);
         return response.json();
     },
-    
-    async getTestCaseFile(path) {
-        const response = await fetch(`${this.baseUrl}/api/testcases/file?path=${encodeURIComponent(path)}`);
+
+    async getWorkspaceFile(path) {
+        const response = await fetch(`${this.baseUrl}/api/workspace/file?path=${encodeURIComponent(path)}`);
         if (!response.ok) {
             throw new Error(`获取文件失败: ${response.statusText}`);
         }
         return response.json();
     },
-    
-    async updateTestCaseFile(path, content) {
-        const response = await fetch(`${this.baseUrl}/api/testcases/file`, {
+
+    async updateWorkspaceFile(path, content) {
+        const response = await fetch(`${this.baseUrl}/api/workspace/file`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json'
@@ -68,27 +68,14 @@ const API = {
         });
         return response.json();
     },
-    
-    async getKnowledgeTree() {
-        const response = await fetch(`${this.baseUrl}/api/knowledge/tree`);
-        return response.json();
-    },
-    
-    async getKnowledgeFile(path) {
-        const response = await fetch(`${this.baseUrl}/api/knowledge/file?path=${encodeURIComponent(path)}`);
-        if (!response.ok) {
-            throw new Error(`获取文件失败: ${response.statusText}`);
-        }
-        return response.json();
-    },
-    
-    async updateKnowledgeFile(path, content) {
-        const response = await fetch(`${this.baseUrl}/api/knowledge/file`, {
-            method: 'PUT',
+
+    async convertWorkspaceFile(path) {
+        const response = await fetch(`${this.baseUrl}/api/workspace/convert`, {
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ path, content })
+            body: JSON.stringify({ path })
         });
         return response.json();
     },

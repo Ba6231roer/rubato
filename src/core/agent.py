@@ -822,6 +822,10 @@ class RubatoAgent:
             "skills": skills
         })
     
+    def set_compression_callback(self, callback):
+        if self._query_engine:
+            self._query_engine.set_compression_callback(callback)
+
     def clear_context(self) -> None:
         self.context_manager.clear()
         self._query_engine = self._create_query_engine()

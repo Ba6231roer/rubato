@@ -1,22 +1,13 @@
 name: test-case-generator
 description: 测试案例生成者 - 负责根据需求生成测试案例
 system_prompt_file: prompts/roles/test_case_generator.txt
-
 model:
-  inherit: false
-  provider: "openai"
-  name: "deepseek-chat"
-  api_key: "${DEEPSEEK_API_KEY}"
-  base_url: https://api.deepseek.com/v1
-  temperature: 0.8
-  max_tokens: 200000
-
+  inherit: true
 execution:
   max_context_tokens: 200000
   timeout: 300
   recursion_limit: 1000
   sub_agent_recursion_limit: 500
-
 tools:
   builtin:
     spawn_agent: true
@@ -27,7 +18,6 @@ tools:
         "read:*": "allow"
         "write:*.md": "allow"
         "write:*.txt": "allow"
-        "mkdir:*": "allow"
   mcp:
     enabled: false
   skills:

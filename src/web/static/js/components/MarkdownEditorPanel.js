@@ -115,6 +115,27 @@ class MarkdownEditorPanel {
     clear() {
         this.setContent('');
     }
+
+    disableEditing(filePath) {
+        if (this.editorEl) {
+            this.editorEl.disabled = true;
+            this.editorEl.placeholder = '此文件格式不支持编辑';
+            this.editorEl.value = '';
+        }
+        if (this.saveBtn) {
+            this.saveBtn.disabled = true;
+        }
+    }
+
+    enableEditing() {
+        if (this.editorEl) {
+            this.editorEl.disabled = false;
+            this.editorEl.placeholder = this.placeholder;
+        }
+        if (this.saveBtn) {
+            this.saveBtn.disabled = false;
+        }
+    }
 }
 
 window.MarkdownEditorPanel = MarkdownEditorPanel;

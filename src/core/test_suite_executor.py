@@ -122,7 +122,7 @@ class TestCaseScanner:
 
     SUPPORTED_EXTENSIONS = {".md", ".txt", ".yaml", ".yml", ".json"}
 
-    def __init__(self, base_dir: str = "test_cases"):
+    def __init__(self, base_dir: str = "workspace/test_cases"):
         self.base_dir = Path(base_dir)
         self._logger = get_llm_logger()
 

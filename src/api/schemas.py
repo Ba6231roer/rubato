@@ -78,6 +78,44 @@ class TestCaseFileUpdateResponse(BaseModel):
     message: str
 
 
+class WorkspaceTreeNode(BaseModel):
+    name: str
+    type: str
+    path: str
+    file_type: Optional[str] = None
+    children: Optional[List['WorkspaceTreeNode']] = None
+
+
+WorkspaceTreeNode.model_rebuild()
+
+
+class WorkspaceFileContent(BaseModel):
+    path: str
+    content: Optional[str] = None
+    editable: bool = True
+    file_type: str = "text"
+
+
+class WorkspaceFileUpdateRequest(BaseModel):
+    path: str
+    content: str
+
+
+class WorkspaceFileUpdateResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class WorkspaceConvertRequest(BaseModel):
+    path: str
+
+
+class WorkspaceConvertResponse(BaseModel):
+    success: bool
+    content: Optional[str] = None
+    message: str = ""
+
+
 class CommandRequest(BaseModel):
     command: str
 
