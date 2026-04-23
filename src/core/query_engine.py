@@ -202,6 +202,7 @@ class QueryEngineConfig:
     tool_result_persist_threshold: int = 50000
     tool_result_budget_per_message: int = 200000
     max_consecutive_failures: int = 3
+    large_message_char_threshold: int = 50000
     llm_timeout: Optional[float] = None
     retry_max_count: int = 3
     retry_initial_delay: float = 10.0
@@ -234,6 +235,7 @@ class QueryEngine:
         self._reactive_compact_attempted: bool = False
         self.logger = get_llm_logger()
         self._session_storage: Optional[SessionStorage] = config.session_storage
+        self._last_persisted_count = 0
         if self._session_storage:
             skill_names = [s.name for s in config.skills if hasattr(s, 'name')]
             self._session_storage.save_session(
@@ -310,6 +312,7 @@ class QueryEngine:
                 content_replacement_state=self._content_replacement_state,
                 logger=self.logger,
                 task_intent_manager=self._task_intent_manager,
+                large_message_char_threshold=config.large_message_char_threshold,
             )
         else:
             self._tool_result_storage = None
@@ -399,13 +402,16 @@ class QueryEngine:
         finally:
             self._is_running = False
             if self._session_storage and self.mutable_messages:
-                try:
-                    self._session_storage.append_messages(
-                        self._session_id, self.mutable_messages,
-                        metadata={"role": self.config.role_name, "model": self.config.model_name or ""},
-                    )
-                except Exception:
-                    pass
+                new_msgs = self.mutable_messages[self._last_persisted_count:]
+                if new_msgs:
+                    try:
+                        self._session_storage.append_messages(
+                            self._session_id, new_msgs,
+                            metadata={"role": self.config.role_name, "model": self.config.model_name or ""},
+                        )
+                        self._last_persisted_count = len(self.mutable_messages)
+                    except Exception:
+                        pass
             self.logger.log_agent_action("query_end", {
                 "session_id": self._session_id,
                 "total_turns": self._current_turn,
@@ -457,6 +463,7 @@ class QueryEngine:
                     content={
                         "original_count": compression_info["original_count"],
                         "compressed_count": compression_info["compressed_count"],
+                        "trigger": compression_info.get("trigger", "auto"),
                     },
                     metadata={"session_id": self._session_id}
                 )
@@ -576,6 +583,7 @@ class QueryEngine:
                         content=llm_response.content,
                         metadata={"phase": "final", "reason": "task_complete" if task_seems_complete else "max_no_tool_turns"}
                     )
+                    await self._persist_new_messages()
                     break
                 else:
                     tool_names = list(self._tool_map.keys())
@@ -603,6 +611,7 @@ class QueryEngine:
                             "turn": self._current_turn,
                             "available_tools": tool_names[:5]
                         })
+                    await self._persist_new_messages()
                     continue
             
             no_tool_turn_count = 0
@@ -709,6 +718,7 @@ class QueryEngine:
                     "turn": self._current_turn
                 }
             )
+            await self._persist_new_messages()
         
         self.conversation_history.finish_turn()
         
@@ -757,9 +767,11 @@ class QueryEngine:
         messages = self._compressor.get_messages_after_compact_boundary(self.mutable_messages)
         messages, _ = self._compressor.apply_tool_result_budget(messages)
         messages, snip_tokens_freed = self._compressor.snip_compact(messages)
+        messages, large_tokens_freed = self._compressor.preprocess_large_messages(messages)
+        total_tokens_freed = snip_tokens_freed + large_tokens_freed
 
         original_len = len(self.mutable_messages)
-        messages = await self._compressor.auto_compact_if_needed(messages, snip_tokens_freed)
+        messages = await self._compressor.auto_compact_if_needed(messages, total_tokens_freed)
 
         if len(messages) < original_len:
             self.mutable_messages = messages
@@ -780,7 +792,7 @@ class QueryEngine:
                     "original_count": original_len,
                     "compressed_count": len(self.mutable_messages),
                 })
-            return {"compressed": True, "original_count": original_len, "compressed_count": len(self.mutable_messages)}
+            return {"compressed": True, "original_count": original_len, "compressed_count": len(self.mutable_messages), "trigger": "auto"}
         elif messages is not self.mutable_messages:
             self.mutable_messages = messages
 
@@ -952,6 +964,7 @@ class QueryEngine:
     def clear_messages(self) -> None:
         self.mutable_messages.clear()
         self._session_id = str(uuid.uuid4())
+        self._last_persisted_count = 0
         self._current_turn = 0
         self.total_usage = Usage()
         self.permission_denials.clear()
@@ -1165,6 +1178,21 @@ class QueryEngine:
         if self._compressor is not None:
             self._compressor.update_usage_from_response(response)
     
+    async def _persist_new_messages(self):
+        if not self._session_storage:
+            return
+        new_msgs = self.mutable_messages[self._last_persisted_count:]
+        if not new_msgs:
+            return
+        try:
+            self._session_storage.append_messages(
+                self._session_id, new_msgs,
+                metadata={"role": self.config.role_name, "model": self.config.model_name or ""},
+            )
+            self._last_persisted_count = len(self.mutable_messages)
+        except Exception:
+            self.logger.log_error("session_persist", Exception("Failed to persist messages"))
+
     def load_session(self, session_id: str) -> bool:
         if not self._session_storage:
             return False

@@ -736,3 +736,92 @@ class TestTruncateHeadForPtlRetry:
         result = compressor._truncate_head_for_ptl_retry(messages)
         assert len(result) < len(messages)
         assert "resp1" in [m.content for m in result]
+
+
+class TestPreprocessLargeMessages:
+    def test_no_large_messages(self):
+        compressor = _make_compressor()
+        messages = [HumanMessage(content="short message"), AIMessage(content="reply")]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert result == messages
+        assert freed == 0
+
+    def test_truncates_large_human_message(self):
+        compressor = _make_compressor()
+        large_content = "a" * 60000
+        messages = [HumanMessage(content=large_content)]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert len(result) == 1
+        assert isinstance(result[0], HumanMessage)
+        assert result[0].content.startswith("a" * 10000)
+        assert "内容已截断" in result[0].content
+        assert "60000 字符" in result[0].content
+        assert freed > 0
+
+    def test_skips_compact_summary_message(self):
+        compressor = _make_compressor()
+        content = "This session is being continued" + "a" * 60000
+        messages = [HumanMessage(content=content)]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert result == messages
+        assert freed == 0
+
+    def test_skips_task_intent_message(self):
+        compressor = _make_compressor()
+        content = "[Task Intent - PRESERVED] some task" + "a" * 60000
+        messages = [HumanMessage(content=content)]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert result == messages
+        assert freed == 0
+
+    def test_skips_non_human_messages(self):
+        compressor = _make_compressor()
+        large_content = "a" * 60000
+        messages = [AIMessage(content=large_content), ToolMessage(content=large_content, tool_call_id="tc1")]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert result == messages
+        assert freed == 0
+
+    def test_mixed_messages_only_truncates_large_human(self):
+        compressor = _make_compressor()
+        large_content = "b" * 60000
+        messages = [
+            HumanMessage(content="short"),
+            AIMessage(content="reply"),
+            HumanMessage(content=large_content),
+            HumanMessage(content="also short"),
+        ]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert len(result) == 4
+        assert result[0].content == "short"
+        assert result[1].content == "reply"
+        assert "内容已截断" in result[2].content
+        assert result[3].content == "also short"
+        assert freed > 0
+
+    def test_custom_threshold(self):
+        compressor = _make_compressor()
+        compressor.large_message_char_threshold = 100
+        content = "a" * 20000
+        messages = [HumanMessage(content=content)]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert len(result) == 1
+        assert "内容已截断" in result[0].content
+        assert "20000 字符" in result[0].content
+        assert freed > 0
+
+    def test_message_at_threshold_not_truncated(self):
+        compressor = _make_compressor()
+        content = "a" * 50000
+        messages = [HumanMessage(content=content)]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert result == messages
+        assert freed == 0
+
+    def test_message_just_above_threshold_truncated(self):
+        compressor = _make_compressor()
+        content = "a" * 50001
+        messages = [HumanMessage(content=content)]
+        result, freed = compressor.preprocess_large_messages(messages)
+        assert "内容已截断" in result[0].content
+        assert freed > 0

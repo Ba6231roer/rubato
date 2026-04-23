@@ -70,12 +70,41 @@ class WorkspaceManager {
             onFileSelect: (path) => this.selectFile(path)
         });
 
+        this.treeRefreshBtn = document.createElement('button');
+        this.treeRefreshBtn.className = 'panel-header-btn refresh-btn';
+        this.treeRefreshBtn.textContent = '↻';
+        this.treeRefreshBtn.title = '刷新目录';
+        this.treeRefreshBtn.addEventListener('click', () => {
+            this.treeRefreshBtn.classList.add('spinning');
+            this.directoryTree.refresh();
+            setTimeout(() => {
+                this.treeRefreshBtn.classList.remove('spinning');
+            }, 500);
+        });
+        this.treePanel.addHeaderAction(this.treeRefreshBtn);
+
         this.fileEditor = new MarkdownEditorPanel({
             container: this.editorPanel.contentEl,
             placeholder: '选择一个文件进行编辑...',
             onContentChange: (content) => this.handleContentChange(content),
             onSave: (content) => this.saveFile(content)
         });
+
+        this.editorRefreshBtn = document.createElement('button');
+        this.editorRefreshBtn.className = 'panel-header-btn refresh-btn';
+        this.editorRefreshBtn.textContent = '↻';
+        this.editorRefreshBtn.title = '刷新文件';
+        this.editorRefreshBtn.disabled = true;
+        this.editorRefreshBtn.addEventListener('click', () => {
+            if (!this.currentFile) return;
+            this.editorRefreshBtn.classList.add('spinning');
+            this.selectFile(this.currentFile).finally(() => {
+                setTimeout(() => {
+                    this.editorRefreshBtn.classList.remove('spinning');
+                }, 300);
+            });
+        });
+        this.editorPanel.addHeaderAction(this.editorRefreshBtn);
 
         this.fileEditor.addSaveButton(this.editorPanel.headerEl);
 
@@ -95,6 +124,7 @@ class WorkspaceManager {
 
     async selectFile(path) {
         this.currentFile = path;
+        this.editorRefreshBtn.disabled = false;
 
         try {
             const data = await API.getWorkspaceFile(path);

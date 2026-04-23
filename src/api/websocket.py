@@ -166,7 +166,7 @@ async def handle_stop(websocket: WebSocket):
 
 
 async def _resolve_file_references(content: str) -> str:
-    pattern = r'@(workspace[/\\][^\s]+)'
+    pattern = r'@(workspace[/\\].+?\.(?:md|txt|docx|doc|pdf|pptx|xlsx|csv|json|yaml|yml|py|js|ts|html|css|xml|sql|sh|bat|ini|cfg|log|rst|tex))'
     matches = re.findall(pattern, content)
     
     if not matches:
@@ -183,20 +183,20 @@ async def _resolve_file_references(content: str) -> str:
         
         path = Path(file_path)
         if not path.exists():
-            resolved_parts.append(f"@{file_path}: [文件不存在]")
+            resolved_parts.append(f'<file_content path="{file_path}">\n[文件不存在]\n</file_content>')
             remaining = remaining.replace(file_ref, '', 1)
             continue
         
         try:
             text_content = convert_to_text(str(path))
-            resolved_parts.append(f"@{file_path}: {text_content}")
+            resolved_parts.append(f'<file_content path="{file_path}">\n{text_content}\n</file_content>')
             remaining = remaining.replace(file_ref, '', 1)
         except Exception as e:
-            resolved_parts.append(f"@{file_path}: [文件读取失败: {str(e)}]")
+            resolved_parts.append(f'<file_content path="{file_path}">\n[文件读取失败: {str(e)}]\n</file_content>')
             remaining = remaining.replace(file_ref, '', 1)
     
     if resolved_parts:
-        file_lines = '  \n'.join(resolved_parts) + '  '
+        file_lines = '\n\n'.join(resolved_parts)
         return file_lines + '\n\n' + remaining.strip()
     return remaining
 

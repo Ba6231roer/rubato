@@ -14,6 +14,7 @@ agent:
     tool_result_persist_threshold: 50000
     tool_result_budget_per_message: 200000
     max_consecutive_failures: 3
+    large_message_char_threshold: 50000
     skill_stale_timeout_seconds: 300
     task_intent_protection:
       enabled: true

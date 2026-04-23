@@ -1,6 +1,7 @@
 import os
 from typing import Optional
 
+import tiktoken
 from langchain_core.messages import HumanMessage
 
 TASK_INTENT_FILENAME = "task-intent.txt"
@@ -13,21 +14,31 @@ class TaskIntentManager:
         session_dir: str = "",
         full_threshold: int = 2000,
         token_budget: int = 10000,
+        large_input_token_threshold: int = 10000,
     ):
         self.session_dir = session_dir
         self.full_threshold = full_threshold
         self.token_budget = token_budget
+        self.large_input_token_threshold = large_input_token_threshold
 
         self._mode: Optional[str] = None
         self._full_content: Optional[str] = None
         self._preview: Optional[str] = None
         self._file_path: Optional[str] = None
+        self._token_count: int = 0
+        self._encoding = tiktoken.get_encoding("cl100k_base")
+
+    def _estimate_tokens(self, text: str) -> int:
+        return len(self._encoding.encode(text))
 
     def extract_task_intent(self, user_message: str) -> None:
         if self._mode is not None:
             return
 
-        if len(user_message) <= self.full_threshold:
+        self._token_count = self._estimate_tokens(user_message)
+        is_large_input = self._token_count > self.large_input_token_threshold
+
+        if len(user_message) <= self.full_threshold and not is_large_input:
             self._mode = "full"
             self._full_content = user_message
             self._preview = None
@@ -46,6 +57,21 @@ class TaskIntentManager:
     def build_recovery_message(self, compressor=None) -> Optional[HumanMessage]:
         if self._mode is None:
             return None
+
+        if self._token_count > self.large_input_token_threshold:
+            if self.session_dir and not self._file_path:
+                os.makedirs(self.session_dir, exist_ok=True)
+                self._file_path = os.path.join(self.session_dir, TASK_INTENT_FILENAME)
+                with open(self._file_path, "w", encoding="utf-8") as f:
+                    f.write(self._full_content)
+
+            content = (
+                f"[Task Intent - PRESERVED]\n"
+                f"{self._preview}\n"
+                f"...\n"
+                f"[Full task specification persisted to: {self._file_path}]"
+            )
+            return HumanMessage(content=content)
 
         if self._mode == "full":
             content = f"[Task Intent - PRESERVED]\n{self._full_content}"
@@ -113,3 +139,4 @@ class TaskIntentManager:
         self._full_content = None
         self._preview = None
         self._file_path = None
+        self._token_count = 0

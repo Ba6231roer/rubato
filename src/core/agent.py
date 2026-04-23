@@ -152,6 +152,7 @@ class RubatoAgent:
             tool_result_persist_threshold=getattr(self.compression_config, 'tool_result_persist_threshold', 50000),
             tool_result_budget_per_message=getattr(self.compression_config, 'tool_result_budget_per_message', 200000),
             max_consecutive_failures=getattr(self.compression_config, 'max_consecutive_failures', 3),
+            large_message_char_threshold=getattr(self.compression_config, 'large_message_char_threshold', 50000),
             llm_timeout=float(self.config.agent.execution.llm_timeout),
             retry_max_count=self.config.model.parameters.retry_max_count,
             retry_initial_delay=self.config.model.parameters.retry_initial_delay,

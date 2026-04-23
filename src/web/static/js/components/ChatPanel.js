@@ -697,9 +697,25 @@ class ChatPanel {
         msgEl.className = 'message system';
         const originalCount = data.original_count || '?';
         const compressedCount = data.compressed_count || '?';
+        const trigger = data.trigger || '';
+        let bodyLines = `压缩前消息数: ${originalCount}\n压缩后消息数: ${compressedCount}`;
+        if (trigger) {
+            bodyLines += `\n触发原因: ${this.escapeHtml(trigger)}`;
+        }
         msgEl.innerHTML = `
             <div class="message-header">系统</div>
-            <div class="message-content compression-notice">⚠️ 上下文已压缩（压缩前${originalCount}条消息 → 压缩后${compressedCount}条消息）</div>
+            <div class="message-content">
+                <div class="compression-card">
+                    <div class="compression-card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                        <span class="compression-card-icon">▶</span>
+                        <span class="compression-card-title">⚠️ 上下文已压缩</span>
+                        <span class="compression-card-summary">压缩前${originalCount}条 → 压缩后${compressedCount}条</span>
+                    </div>
+                    <div class="compression-card-body">
+                        <pre>${bodyLines}</pre>
+                    </div>
+                </div>
+            </div>
         `;
         this.messagesEl.appendChild(msgEl);
         this.messages.push({ type: 'system', content: '上下文已压缩' });

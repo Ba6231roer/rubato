@@ -23,6 +23,25 @@ class DirectoryTree {
         wrapper.appendChild(this.treeEl);
         this.container.appendChild(wrapper);
 
+        this.treeEl.addEventListener('click', (e) => {
+            const folderItem = e.target.closest('.tree-item.folder');
+            const fileItem = e.target.closest('.tree-item.file');
+
+            if (folderItem) {
+                this.toggleFolder(folderItem.parentElement);
+            } else if (fileItem) {
+                this.selectFile(fileItem);
+            }
+        });
+
+        this.treeEl.addEventListener('dragstart', (e) => {
+            const fileItem = e.target.closest('.tree-item.file');
+            if (fileItem) {
+                e.dataTransfer.setData('text/plain', fileItem.dataset.path);
+                e.dataTransfer.effectAllowed = 'copy';
+            }
+        });
+
         this.loadTree();
     }
 
@@ -44,7 +63,6 @@ class DirectoryTree {
             return;
         }
         this.treeEl.innerHTML = this.renderTreeNodes(this.tree);
-        this.bindEvents();
     }
 
     renderTreeNodes(nodes) {
@@ -80,27 +98,6 @@ class DirectoryTree {
             }
         }
         return html;
-    }
-    
-    bindEvents() {
-        this.treeEl.addEventListener('click', (e) => {
-            const folderItem = e.target.closest('.tree-item.folder');
-            const fileItem = e.target.closest('.tree-item.file');
-            
-            if (folderItem) {
-                this.toggleFolder(folderItem.parentElement);
-            } else if (fileItem) {
-                this.selectFile(fileItem);
-            }
-        });
-
-        this.treeEl.addEventListener('dragstart', (e) => {
-            const fileItem = e.target.closest('.tree-item.file');
-            if (fileItem) {
-                e.dataTransfer.setData('text/plain', fileItem.dataset.path);
-                e.dataTransfer.effectAllowed = 'copy';
-            }
-        });
     }
     
     toggleFolder(folderNode) {

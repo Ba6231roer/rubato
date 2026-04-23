@@ -227,3 +227,92 @@ class TestPersistedFilePath:
         manager = TaskIntentManager(session_dir=new_dir, full_threshold=100)
         manager.extract_task_intent("A" * 200)
         assert os.path.isdir(new_dir)
+
+
+class TestLargeInputTokenThreshold:
+    def test_large_input_forces_persisted_mode(self, tmp_path):
+        manager = TaskIntentManager(
+            session_dir=str(tmp_path),
+            full_threshold=100000,
+            large_input_token_threshold=10,
+        )
+        msg = "A" * 500
+        manager.extract_task_intent(msg)
+        assert manager._mode == "persisted"
+        assert manager._preview == msg[:100000]
+        assert manager._file_path is not None
+        assert os.path.exists(manager._file_path)
+        with open(manager._file_path, "r", encoding="utf-8") as f:
+            assert f.read() == msg
+
+    def test_below_token_threshold_stays_full_mode(self):
+        manager = TaskIntentManager(
+            full_threshold=100000,
+            large_input_token_threshold=10000,
+        )
+        msg = "A" * 500
+        manager.extract_task_intent(msg)
+        assert manager._mode == "full"
+        assert manager._token_count < 10000
+
+    def test_token_count_recorded(self):
+        manager = TaskIntentManager()
+        msg = "Hello world"
+        manager.extract_task_intent(msg)
+        assert manager._token_count > 0
+
+    def test_recovery_message_for_large_input(self, tmp_path):
+        manager = TaskIntentManager(
+            session_dir=str(tmp_path),
+            full_threshold=50,
+            large_input_token_threshold=10,
+        )
+        msg = "A" * 500
+        manager.extract_task_intent(msg)
+        result = manager.build_recovery_message()
+        assert isinstance(result, HumanMessage)
+        assert "[Task Intent - PRESERVED]" in result.content
+        assert "Full task specification persisted to:" in result.content
+        assert manager._file_path in result.content
+        assert "A" * 500 not in result.content
+
+    def test_recovery_message_for_large_input_persists_if_not_yet(self, tmp_path):
+        manager = TaskIntentManager(
+            session_dir=str(tmp_path),
+            full_threshold=100000,
+            large_input_token_threshold=10,
+        )
+        msg = "A" * 500
+        manager.extract_task_intent(msg)
+        manager._file_path = None
+        result = manager.build_recovery_message()
+        assert manager._file_path is not None
+        assert os.path.exists(manager._file_path)
+        with open(manager._file_path, "r", encoding="utf-8") as f:
+            assert f.read() == msg
+
+    def test_large_input_recovery_skips_compressor_path(self, tmp_path):
+        manager = TaskIntentManager(
+            session_dir=str(tmp_path),
+            full_threshold=100000,
+            large_input_token_threshold=10,
+            token_budget=5,
+        )
+        msg = "A" * 500
+        manager.extract_task_intent(msg)
+        mock_compressor = MagicMock()
+        mock_compressor.count_text_tokens.side_effect = lambda text: len(text) // 4
+        result = manager.build_recovery_message(compressor=mock_compressor)
+        assert "[Task Intent - PRESERVED]" in result.content
+        assert "Full task specification persisted to:" in result.content
+        mock_compressor.count_text_tokens.assert_not_called()
+
+    def test_clear_resets_token_count(self, tmp_path):
+        manager = TaskIntentManager(
+            session_dir=str(tmp_path),
+            large_input_token_threshold=10,
+        )
+        manager.extract_task_intent("A" * 500)
+        assert manager._token_count > 0
+        manager.clear()
+        assert manager._token_count == 0

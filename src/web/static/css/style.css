@@ -928,6 +928,46 @@ body {
     cursor: not-allowed;
 }
 
+.panel-header-btn {
+    width: var(--collapse-btn-size);
+    height: var(--collapse-btn-size);
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.875rem;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.panel-header-btn:hover {
+    background-color: rgba(74, 144, 217, 0.1);
+    color: var(--text-color);
+}
+
+.panel-header-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.panel-header-btn:disabled:hover {
+    background-color: transparent;
+    color: var(--text-muted);
+}
+
+.refresh-btn.spinning {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
 .panel-content {
     flex: 1;
     overflow: hidden;
@@ -1797,6 +1837,74 @@ body {
     background: rgba(240, 173, 78, 0.1);
     border-left: 3px solid #f0ad4e;
     padding: 8px 12px;
+}
+
+.compression-card {
+    border: 1px solid #f0ad4e;
+    border-radius: 6px;
+    margin: 4px 0;
+    white-space: normal;
+    background: rgba(240, 173, 78, 0.08);
+    overflow: hidden;
+}
+
+.compression-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.compression-card-header:hover {
+    background: rgba(240, 173, 78, 0.12);
+}
+
+.compression-card-icon {
+    font-size: 0.75rem;
+    color: #f0ad4e;
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+}
+
+.compression-card:not(.collapsed) .compression-card-icon {
+    transform: rotate(90deg);
+}
+
+.compression-card-title {
+    font-weight: 600;
+    font-size: 0.8rem;
+    color: #f0ad4e;
+}
+
+.compression-card-summary {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.compression-card-body {
+    padding: 0 12px 8px;
+}
+
+.compression-card.collapsed .compression-card-body {
+    display: none;
+}
+
+.compression-card-body pre {
+    background: var(--content-bg);
+    padding: 10px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    color: #f0ad4e;
 }
 
 .compression-notice {

@@ -26,6 +26,7 @@ class ContextCompressor:
         content_replacement_state=None,
         logger=None,
         task_intent_manager: Optional[TaskIntentManager] = None,
+        large_message_char_threshold: int = 50000,
     ):
         self.llm_caller = llm_caller
         self.max_context_tokens = max_context_tokens
@@ -41,6 +42,7 @@ class ContextCompressor:
         self.content_replacement_state = content_replacement_state
         self.logger = logger or get_llm_logger()
         self.task_intent_manager = task_intent_manager
+        self.large_message_char_threshold = large_message_char_threshold
 
         self.encoding = tiktoken.get_encoding("cl100k_base")
         self._last_api_usage_tokens: int = 0
@@ -143,6 +145,37 @@ class ContextCompressor:
                 modified_messages[idx] = new_msg
                 new_tokens = self.count_text_tokens(TOOL_RESULT_CLEARED_MESSAGE)
                 tokens_freed += max(0, old_tokens - new_tokens)
+
+        return modified_messages, tokens_freed
+
+    def preprocess_large_messages(self, messages: List[BaseMessage]) -> Tuple[List[BaseMessage], int]:
+        threshold = self.large_message_char_threshold
+        modified_messages = list(messages)
+        tokens_freed = 0
+
+        for i, msg in enumerate(modified_messages):
+            if not isinstance(msg, HumanMessage):
+                continue
+
+            content_str = self._get_content_str(msg.content)
+            if len(content_str) <= threshold:
+                continue
+
+            if content_str.startswith("This session is being continued"):
+                continue
+
+            if content_str.startswith("[Task Intent - PRESERVED]"):
+                continue
+
+            old_tokens = self.count_text_tokens(content_str)
+            truncated = content_str[:10000] + f"\n\n...[内容已截断，原始大小: {len(content_str)} 字符]"
+            new_msg = HumanMessage(
+                content=truncated,
+                **{k: v for k, v in msg.__dict__.items() if k not in ('content', 'type', 'id') and not k.startswith('_')},
+            )
+            modified_messages[i] = new_msg
+            new_tokens = self.count_text_tokens(truncated)
+            tokens_freed += max(0, old_tokens - new_tokens)
 
         return modified_messages, tokens_freed
 
