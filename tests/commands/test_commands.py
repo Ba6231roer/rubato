@@ -436,6 +436,28 @@ class TestSkillCommand:
         result = await cmd.execute("load deploy", ctx)
         assert "已加载过" in result.message
 
+    async def test_skill_load_already_loaded_refreshes_reference(self):
+        from src.commands.impl.skill import SkillCommand
+        sl = _make_skill_loader()
+        agent = _make_agent()
+        agent.context_manager.is_skill_loaded = MagicMock(return_value=True)
+        agent._system_prompt_registry.has_skill = MagicMock(return_value=True)
+        ctx = CommandContext(skill_loader=sl, agent=agent)
+        cmd = SkillCommand()
+        await cmd.execute("load deploy", ctx)
+        agent._system_prompt_registry.mark_skill_referenced.assert_called_once_with("deploy")
+
+    async def test_skill_load_already_loaded_no_refresh_when_not_in_registry(self):
+        from src.commands.impl.skill import SkillCommand
+        sl = _make_skill_loader()
+        agent = _make_agent()
+        agent.context_manager.is_skill_loaded = MagicMock(return_value=True)
+        agent._system_prompt_registry.has_skill = MagicMock(return_value=False)
+        ctx = CommandContext(skill_loader=sl, agent=agent)
+        cmd = SkillCommand()
+        await cmd.execute("load deploy", ctx)
+        agent._system_prompt_registry.mark_skill_referenced.assert_not_called()
+
     async def test_skill_load_not_found(self):
         from src.commands.impl.skill import SkillCommand
         sl = _make_skill_loader()

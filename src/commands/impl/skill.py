@@ -102,6 +102,8 @@ class SkillCommand(BaseCommand):
         for name in names:
             if context.agent.context_manager.is_skill_loaded(name):
                 already_loaded.append(name)
+                if context.agent._system_prompt_registry.has_skill(name):
+                    context.agent._system_prompt_registry.mark_skill_referenced(name)
                 continue
             
             if not context.skill_loader.has_skill(name):

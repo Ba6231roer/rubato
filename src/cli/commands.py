@@ -220,6 +220,8 @@ Skill管理：
             for name in skill_names:
                 if self.agent.context_manager.is_skill_loaded(name):
                     already_loaded.append(name)
+                    if self.agent._system_prompt_registry.has_skill(name):
+                        self.agent._system_prompt_registry.mark_skill_referenced(name)
                     continue
                 
                 if not self.skill_loader.has_skill(name):

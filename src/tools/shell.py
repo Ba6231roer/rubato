@@ -1,5 +1,7 @@
 import json
+import locale
 import logging
+import subprocess
 from typing import Any, List, Optional, Type, Union
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.tools import BaseTool
@@ -57,15 +59,39 @@ class RubatoShellInput(BaseModel):
         return self
 
 
+_SYSTEM_ENCODING = locale.getpreferredencoding() or "utf-8"
+
+
 class RubatoShellTool(ShellTool):
     name: str = "terminal"
     args_schema: Type[BaseModel] = RubatoShellInput
+
+    @staticmethod
+    def _decode_output(raw: bytes) -> str:
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            pass
+        try:
+            return raw.decode(_SYSTEM_ENCODING)
+        except (UnicodeDecodeError, LookupError):
+            return raw.decode("utf-8", errors="replace")
 
     def _run(
         self,
         commands: Union[str, List[str]],
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
-        if isinstance(commands, str):
-            commands = [commands]
-        return self.process.run(commands)
+        if isinstance(commands, list):
+            commands = " && ".join(commands)
+        try:
+            result = subprocess.run(
+                commands,
+                shell=True,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+            return self._decode_output(result.stdout)
+        except subprocess.CalledProcessError as e:
+            return self._decode_output(e.stdout) if e.stdout else str(e)

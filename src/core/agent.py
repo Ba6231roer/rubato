@@ -439,7 +439,10 @@ class RubatoAgent:
             self._current_system_prompt = self._system_prompt_registry.build()
             self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
-        elif self._query_engine is None:
+        elif skill_name and self._system_prompt_registry.has_skill(skill_name):
+            self._system_prompt_registry.mark_skill_referenced(skill_name)
+        
+        if self._query_engine is None:
             self._query_engine = self._create_query_engine()
         
         self._query_engine.update_session_metadata(role=self.get_role_name(), model=self.llm.model_name if hasattr(self.llm, 'model_name') else "")
@@ -537,7 +540,10 @@ class RubatoAgent:
             self._current_system_prompt = self._system_prompt_registry.build()
             self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
-        elif self._query_engine is None:
+        elif skill_name and self._system_prompt_registry.has_skill(skill_name):
+            self._system_prompt_registry.mark_skill_referenced(skill_name)
+        
+        if self._query_engine is None:
             self._query_engine = self._create_query_engine()
         
         self._query_engine.update_session_metadata(role=self.get_role_name(), model=self.llm.model_name if hasattr(self.llm, 'model_name') else "")
@@ -646,7 +652,10 @@ class RubatoAgent:
             self._current_system_prompt = self._system_prompt_registry.build()
             self._rebuild_query_engine()
             self.context_manager.mark_skill_loaded(skill_name)
-        elif self._query_engine is None:
+        elif skill_name and self._system_prompt_registry.has_skill(skill_name):
+            self._system_prompt_registry.mark_skill_referenced(skill_name)
+        
+        if self._query_engine is None:
             self._query_engine = self._create_query_engine()
         
         self.logger.log_agent_action("query_engine_stream_start", {

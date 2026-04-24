@@ -557,6 +557,79 @@ def test_build_system_prompt_marks_skills_loaded():
     print("[PASS] _build_system_prompt_with_skills() 正确标记 skill 为已加载\n")
 
 
+def test_skill_referenced_not_removed_as_stale():
+    """测试：已加载的 Skill 被刷新引用时间后，不会被 remove_stale_skills 误删"""
+    print("=" * 50)
+    print("测试: 已加载 Skill 刷新引用后不被 remove_stale_skills 误删")
+    print("=" * 50)
+
+    from src.context.system_prompt_registry import SystemPromptRegistry
+    import time
+
+    registry = SystemPromptRegistry()
+    registry.add_skill("active-skill", "Active skill content.")
+
+    section = registry._sections["skill_active-skill"]
+    section.last_referenced = time.time() - 290
+
+    registry.mark_skill_referenced("active-skill")
+
+    removed = registry.remove_stale_skills(300)
+    assert "active-skill" not in removed, f"刷新引用后不应被清理, 实际被清理: {removed}"
+    assert registry.has_skill("active-skill"), "刷新引用后 Skill 应仍在注册表中"
+
+    print("[PASS] 刷新引用后的 Skill 不会被 remove_stale_skills 误删\n")
+
+
+def test_skill_not_referenced_removed_as_stale():
+    """测试：未刷新引用时间的 Skill 超时后会被正确清理"""
+    print("=" * 50)
+    print("测试: 未刷新引用时间的 Skill 超时后被正确清理")
+    print("=" * 50)
+
+    from src.context.system_prompt_registry import SystemPromptRegistry
+    import time
+
+    registry = SystemPromptRegistry()
+    registry.add_skill("stale-skill", "Stale skill content.")
+
+    section = registry._sections["skill_stale-skill"]
+    section.last_referenced = time.time() - 301
+
+    removed = registry.remove_stale_skills(300)
+    assert "stale-skill" in removed, f"超时未引用的 Skill 应被清理, 实际: {removed}"
+    assert not registry.has_skill("stale-skill"), "超时 Skill 应已从注册表中移除"
+
+    print("[PASS] 超时未引用的 Skill 被正确清理\n")
+
+
+def test_skill_reference_refresh_resets_timer():
+    """测试：mark_skill_referenced 正确重置 last_referenced 时间戳"""
+    print("=" * 50)
+    print("测试: mark_skill_referenced 正确重置引用时间戳")
+    print("=" * 50)
+
+    from src.context.system_prompt_registry import SystemPromptRegistry
+    import time
+
+    registry = SystemPromptRegistry()
+    registry.add_skill("timer-skill", "Timer skill content.")
+
+    section = registry._sections["skill_timer-skill"]
+    old_ref = section.last_referenced
+
+    time.sleep(0.05)
+    registry.mark_skill_referenced("timer-skill")
+
+    new_ref = section.last_referenced
+    assert new_ref > old_ref, f"mark_skill_referenced 后 last_referenced 应更新, 旧值={old_ref}, 新值={new_ref}"
+
+    removed = registry.remove_stale_skills(300)
+    assert "timer-skill" not in removed, "刚刷新引用的 Skill 不应被清理"
+
+    print("[PASS] mark_skill_referenced 正确重置引用时间戳\n")
+
+
 if __name__ == "__main__":
     test_load_full_skill_strips_yaml_header()
     test_get_skill_content_sync_strips_yaml_header()
@@ -570,6 +643,9 @@ if __name__ == "__main__":
     test_no_skills_role()
     test_update_role_skills_includes_content()
     test_build_system_prompt_marks_skills_loaded()
+    test_skill_referenced_not_removed_as_stale()
+    test_skill_not_referenced_removed_as_stale()
+    test_skill_reference_refresh_resets_timer()
     print("\n" + "=" * 50)
     print("所有测试通过!")
     print("=" * 50)
