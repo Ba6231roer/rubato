@@ -14,6 +14,9 @@ class SkillMetadata(BaseModel):
     tools: List[str] = []
     paths: List[str] = []
     file_path: str = ""
+    category: str = ""
+    created_by: str = "human"
+    updated_at: str = ""
 
 
 class SkillParser:
@@ -54,6 +57,9 @@ class SkillParser:
                 triggers=metadata_dict.get('triggers', []),
                 tools=metadata_dict.get('tools', []),
                 paths=metadata_dict.get('paths', []),
+                category=metadata_dict.get('category', ''),
+                created_by=metadata_dict.get('created_by', 'human'),
+                updated_at=metadata_dict.get('updated_at', ''),
             )
             return metadata, body
 
@@ -66,3 +72,30 @@ class SkillParser:
         if yaml_content is not None:
             return yaml.safe_load(yaml_content)
         return None
+
+    @staticmethod
+    def build_skill_content(metadata: SkillMetadata, body: str) -> str:
+        """将SkillMetadata和正文序列化为SKILL.md格式字符串"""
+        frontmatter = {
+            'name': metadata.name,
+            'description': metadata.description,
+        }
+        if metadata.version != "1.0":
+            frontmatter['version'] = metadata.version
+        if metadata.author:
+            frontmatter['author'] = metadata.author
+        if metadata.triggers:
+            frontmatter['triggers'] = metadata.triggers
+        if metadata.tools:
+            frontmatter['tools'] = metadata.tools
+        if metadata.paths:
+            frontmatter['paths'] = metadata.paths
+        if metadata.category:
+            frontmatter['category'] = metadata.category
+        if metadata.created_by != "human":
+            frontmatter['created_by'] = metadata.created_by
+        if metadata.updated_at:
+            frontmatter['updated_at'] = metadata.updated_at
+
+        yaml_str = yaml.dump(frontmatter, allow_unicode=True, default_flow_style=False).strip()
+        return f"---\n{yaml_str}\n---\n\n{body}"

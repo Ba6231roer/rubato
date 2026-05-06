@@ -33,6 +33,14 @@ CONFIG_FILES = {
     "test": {
         "file": "test_config.yaml",
         "description": "测试配置 - 系统标识、应用标识、测试案例路径"
+    },
+    "test": {
+        "file": "test_config.yaml",
+        "description": "测试配置 - 系统标识、应用标识、测试案例路径"
+    },
+    "test": {
+        "file": "test_config.yaml",
+        "description": "测试配置 - 系统标识、应用标识、测试案例路径"
     }
 }
 

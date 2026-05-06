@@ -182,6 +182,30 @@ BUILTIN_TOOLS_DOCS: Dict[str, ToolDoc] = {
         ],
         category="builtin"
     ),
+    "skill_manage": ToolDoc(
+        name="skill_manage",
+        description="管理 Skills（创建、修改、查看）。Skills 是你的程序性记忆——针对特定类型任务的可复用方法。",
+        parameters=[
+            ToolParameter("action", "str", "操作类型：create/patch/edit/list/view", required=True),
+            ToolParameter("name", "str", "Skill 名称", required=False),
+            ToolParameter("description", "str", "Skill 描述（create时使用）", required=False),
+            ToolParameter("content", "str", "Skill 完整内容，含YAML头（create/edit时使用）", required=False),
+            ToolParameter("triggers", "str", "触发词，逗号分隔（create时使用）", required=False),
+            ToolParameter("old_string", "str", "要替换的内容（patch时使用）", required=False),
+            ToolParameter("new_string", "str", "替换后的内容（patch时使用）", required=False),
+        ],
+        examples=[
+            ToolExample(
+                description="创建新Skill",
+                code='skill_manage(action="create", name="my_workflow", content="---\\nname: my_workflow\\ndescription: ...\\n---\\n步骤1...")'
+            ),
+            ToolExample(
+                description="修补已有Skill",
+                code='skill_manage(action="patch", name="my_workflow", old_string="旧内容", new_string="新内容")'
+            )
+        ],
+        category="builtin"
+    ),
 }
 
 
@@ -195,7 +219,8 @@ class ToolDocsGenerator:
         self,
         builtin_tools: Optional[List[str]] = None,
         mcp_tools: Optional[List[Dict[str, Any]]] = None,
-        skills: Optional[List[Dict[str, Any]]] = None
+        skills: Optional[List[Dict[str, Any]]] = None,
+        has_skill_manage: bool = False
     ) -> str:
         sections = []
         
@@ -206,7 +231,9 @@ class ToolDocsGenerator:
             sections.append(self._generate_mcp_docs(mcp_tools))
         
         if skills:
-            sections.append(self._generate_skill_docs(skills))
+            sections.append(self._generate_skill_docs(skills, has_skill_manage))
+        elif has_skill_manage:
+            sections.append(self._generate_skill_docs([], has_skill_manage))
         
         if sections:
             return "\n\n# 可用工具说明\n\n" + "\n\n".join(sections)
@@ -249,7 +276,7 @@ class ToolDocsGenerator:
         
         return "\n".join(lines)
     
-    def _generate_skill_docs(self, skills: List[Dict[str, Any]]) -> str:
+    def _generate_skill_docs(self, skills: List[Dict[str, Any]], has_skill_manage: bool = False) -> str:
         lines = ["## Skill\n"]
         
         for skill in skills:
@@ -267,6 +294,12 @@ class ToolDocsGenerator:
             if required_tools:
                 lines.append(f"\n**所需工具**：{', '.join(required_tools)}")
             
+            lines.append("")
+        
+        if has_skill_manage:
+            lines.append("## Skill 自改进指引")
+            lines.append("当你遇到需要反复尝试才能成功的操作（如难以定位的元素、需要特殊技巧的输入），使用 skill_manage 工具将方法保存为 Skill 以便复用。常规操作不需要保存为 Skill。")
+            lines.append("当你使用 Skill 时发现其内容过时、不完整或错误，应立即使用 skill_manage(action='patch') 修补。修改已有 Skill 时系统会自动备份原文件，你可以用文件工具查看差异确认变更。")
             lines.append("")
         
         return "\n".join(lines)
@@ -322,8 +355,8 @@ def generate_tool_docs_for_prompt(
     builtin_tools: Optional[List[str]] = None,
     mcp_tools: Optional[List[Dict[str, Any]]] = None,
     skills: Optional[List[Dict[str, Any]]] = None,
-    include_examples: bool = True
+    include_examples: bool = True,
+    has_skill_manage: bool = False
 ) -> str:
-    """生成用于系统提示词的工具说明文档"""
     generator = ToolDocsGenerator(include_examples=include_examples)
-    return generator.generate_docs(builtin_tools, mcp_tools, skills)
+    return generator.generate_docs(builtin_tools, mcp_tools, skills, has_skill_manage)

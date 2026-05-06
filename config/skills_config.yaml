@@ -1,13 +1,16 @@
 skills:
   directory: "skills"
   
-  auto_load: true
-  
   enabled_skills:
     - test-execution
     - playwright-cli
     - kb-query
   
   skill_loading:
-    trigger_matching: true
     max_loaded_skills: 3
+
+  self_improve:
+    nudge_interval: 30
+    background_review:
+      enabled: false
+      max_iterations: 8

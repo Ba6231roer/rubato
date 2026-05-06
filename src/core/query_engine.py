@@ -216,6 +216,7 @@ class QueryEngineConfig:
     task_intent_protection_enabled: bool = True
     task_intent_full_threshold: int = 2000
     task_intent_token_budget: int = 10000
+    on_tool_executed: Optional[Callable[[str], None]] = None
 
 
 class QueryEngine:
@@ -693,6 +694,9 @@ class QueryEngine:
                         tool_call_id=tool_call_id,
                         status="success"
                     )
+                    
+                    if self.config.on_tool_executed:
+                        self.config.on_tool_executed(tool_name)
                     
                 except Exception as e:
                     error_msg = self._build_format_hint(

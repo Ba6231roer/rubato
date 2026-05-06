@@ -50,12 +50,6 @@ def build_mcp_config(config) -> Dict[str, Any]:
                 "timeout": 30,
             }
         
-        if server_config.browser:
-            server_cfg["browser"] = server_config.browser
-        
-        if server_config.execution:
-            server_cfg["execution"] = server_config.execution
-        
         mcp_config[server_name] = server_cfg
     
     return mcp_config

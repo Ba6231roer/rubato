@@ -12,6 +12,7 @@ from ..config.loader import ConfigLoader
 from ..context.manager import ContextManager
 from ..context.session_storage import SessionStorage
 from ..skills.loader import SkillLoader
+from ..skills.manager import SkillManager
 from ..mcp.tools import ToolRegistry
 from ..tools.provider import LocalToolProvider, ShellToolProvider
 from ..tools.mcp_provider import MCPToolProvider
@@ -157,7 +158,9 @@ class AgentPool:
     def _create_tool_registry(
         self,
         mcp_manager=None,
-        role_config: Optional[RoleConfig] = None
+        role_config: Optional[RoleConfig] = None,
+        skill_loader: Optional[SkillLoader] = None,
+        on_skill_changed=None
     ) -> ToolRegistry:
         registry = ToolRegistry()
         tools_summary = {"builtin": [], "mcp": [], "file_tools": []}
@@ -193,6 +196,16 @@ class AgentPool:
                 registry.register_provider(file_tool_provider)
                 tools_summary["file_tools"] = [t.name for t in file_tool_provider.get_tools()]
         
+        if self._should_enable_skill_manage(role_config, unified_config):
+            from ..tools.skill_manage import create_skill_manage_tool
+            skill_manage_tool = create_skill_manage_tool(
+                skill_manager=skill_loader if isinstance(skill_loader, SkillLoader) else None,
+                on_skill_changed=on_skill_changed
+            )
+            if skill_manage_tool is not None:
+                registry.register(skill_manage_tool)
+                tools_summary["builtin"].append("skill_manage")
+        
         self._log_tool_summary(tools_summary)
         
         return registry
@@ -218,7 +231,8 @@ class AgentPool:
         
         builtin_names = {'spawn_agent', 'shell_tool', 'file_read', 'file_write', 
                         'file_list', 'file_search', 'file_exists', 'file_mkdir', 
-                        'file_replace', 'file_delete', 'file_copy', 'file_move', 'terminal'}
+                        'file_replace', 'file_delete', 'file_copy', 'file_move', 'terminal',
+                        'skill_manage'}
         
         has_spawn_agent = 'spawn_agent' in available_tools
         has_shell_tool = 'shell_tool' in available_tools
@@ -254,7 +268,8 @@ class AgentPool:
                     shell_tool=ShellToolConfig(enabled=builtin_data.get('shell_tool', True)),
                     file_tools=FileToolsSubConfig(
                         enabled=builtin_data.get('file_tools', {}).get('enabled', True)
-                    )
+                    ),
+                    skill_manage=SpawnAgentConfig(enabled=builtin_data.get('skill_manage', True))
                 )
         
         mcp_config = MCPToolsConfig()
@@ -316,6 +331,18 @@ class AgentPool:
             return self.config.file_tools.enabled
         
         return False
+    
+    def _should_enable_skill_manage(
+        self,
+        role_config: Optional[RoleConfig] = None,
+        unified_config: Optional[UnifiedToolsConfig] = None
+    ) -> bool:
+        if unified_config and unified_config.builtin:
+            builtin_data = unified_config.builtin
+            if hasattr(builtin_data, 'skill_manage') and builtin_data.skill_manage is not None:
+                if hasattr(builtin_data.skill_manage, 'enabled'):
+                    return builtin_data.skill_manage.enabled
+        return True
     
     def _create_file_tool_provider(
         self,
@@ -420,7 +447,8 @@ class AgentPool:
         
         tool_registry = self._create_tool_registry(
             mcp_manager=None,
-            role_config=role_config
+            role_config=role_config,
+            skill_loader=skill_loader
         )
 
         project_root = self.config.project.root if self.config.project else Path.cwd()

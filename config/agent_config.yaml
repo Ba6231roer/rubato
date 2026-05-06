@@ -3,10 +3,7 @@ agent:
   
   message_compression:
     enabled: true
-    max_tokens: 120000
     keep_recent: 6
-    summary_max_length: 300
-    history_summary_count: 10
     autocompact_buffer_tokens: 13000
     manual_compact_buffer_tokens: 3000
     warning_threshold_buffer_tokens: 20000

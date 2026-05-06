@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set
 
@@ -25,18 +26,32 @@ class SkillLoader:
         dir_path: Path,
         skip_existing: bool = False
     ) -> List[SkillMetadata]:
-        """从指定目录加载Skill元数据
-
-        Args:
-            dir_path: Skill目录路径
-            skip_existing: 是否跳过已注册的同名Skill
-        """
         skills = []
 
         if not dir_path.exists():
             return skills
 
+        processed_dirs = set()
+
+        for skill_file in dir_path.rglob("SKILL.md"):
+            try:
+                metadata, content = self.parser.parse_file(skill_file)
+                if metadata.name:
+                    if self.enabled_skills and metadata.name not in self.enabled_skills:
+                        continue
+                    if skip_existing and self.registry.has_skill(metadata.name):
+                        continue
+                    self.registry.register(metadata, content)
+                    skills.append(metadata)
+                    processed_dirs.add(skill_file.parent)
+            except Exception as e:
+                print(f"加载Skill失败 {skill_file}: {e}")
+
         for skill_file in dir_path.rglob("*.md"):
+            if skill_file.name == "SKILL.md":
+                continue
+            if skill_file.parent in processed_dirs:
+                continue
             try:
                 metadata, content = self.parser.parse_file(skill_file)
                 if metadata.name:
@@ -112,13 +127,14 @@ class SkillLoader:
         return self.registry.list_skills()
 
     def get_all_skill_metadata(self) -> dict:
-        """获取所有Skill的元数据字典"""
         return {
             metadata.name: {
                 "name": metadata.name,
                 "description": metadata.description,
                 "triggers": metadata.triggers,
                 "required_tools": metadata.tools,
+                "category": metadata.category,
+                "created_by": metadata.created_by,
             }
             for metadata in self.registry.list_skills()
         }
@@ -136,3 +152,28 @@ class SkillLoader:
     def has_skill(self, skill_name: str) -> bool:
         """检查Skill是否存在"""
         return self.registry.has_skill(skill_name)
+
+    def register_skill_from_agent(
+        self,
+        name: str,
+        description: str,
+        content: str,
+        triggers: Optional[List[str]] = None,
+        category: str = ""
+    ) -> SkillMetadata:
+        metadata = SkillMetadata(
+            name=name,
+            description=description,
+            triggers=triggers or [],
+            category=category,
+            created_by="agent",
+            updated_at=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        )
+        self.registry.register_new_skill(metadata, content)
+        return metadata
+
+    def update_skill_from_agent(self, name: str, content: str) -> bool:
+        if not self.registry.has_skill(name):
+            return False
+        self.registry.update_skill_content(name, content)
+        return True

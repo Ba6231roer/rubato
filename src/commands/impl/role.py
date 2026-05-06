@@ -131,7 +131,9 @@ class RoleCommand(BaseCommand):
             
             new_tool_registry = context.agent_pool._create_tool_registry(
                 mcp_manager=getattr(context.agent, '_mcp_manager', None),
-                role_config=role
+                role_config=role,
+                skill_loader=getattr(context.agent, 'skill_loader', None),
+                on_skill_changed=context.agent._on_skill_changed
             )
             
             context.agent.role_config = role

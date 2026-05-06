@@ -23,16 +23,10 @@ tools:
       audit: true
   
   mcp:
-    config_file: mcp_config.yaml
     auto_connect: true
-    cache_ttl: 300
   
-  skills:
-    config_file: skills_config.yaml
-    auto_load_metadata: true
+  skills: {}
   
   tool_docs:
     auto_inject: true
-    inject_position: "after_prompt"
-    format: "markdown"
     include_examples: true

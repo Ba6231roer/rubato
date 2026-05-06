@@ -48,7 +48,7 @@ tools:
       #   - ask: 每次操作前询问用户确认
       #   - allow: 自动允许所有操作
       #   - deny: 自动拒绝所有操作
-      permission_mode: ask
+      permission_mode: "ask"
       # 工作区配置（可选）
       # workspace:
       #   # 主工作区路径（必填）
@@ -64,19 +64,21 @@ tools:
       #     - "**/__pycache__/**"
       workspace: null
       # 路径权限配置
-      # 可为不同路径设置不同的权限模式
-      # 路径支持 glob 模式匹配
-      permissions: {}
-      # permissions 示例：
-      # permissions:
-      #   # 允许读取 src 目录
-      #   "src/**": allow
-      #   # 拒绝访问敏感配置文件
-      #   "**/.env": deny
-      #   # 询问确认后修改配置文件
-      #   "config/**/*.yaml": ask
-      #   # 允许操作日志目录
-      #   "logs/**": allow
+      # 格式为 "操作:路径模式": 权限
+      # 操作类型：read、write、delete、move、list、search、exists
+      # 路径模式支持 glob 匹配，* 表示匹配所有
+      # 权限值：allow（允许）、ask（询问）、deny（拒绝）
+      permissions:
+        "read:*": "allow"
+        "list:*": "allow"
+        "search:*": "allow"
+        "exists:*": "allow"
+        "write:*.md": "ask"
+        "write:*.py": "ask"
+        "write:*.txt": "allow"
+        "write:*.log": "allow"
+        "delete:*": "deny"
+        "move:*": "ask"
       # 是否启用审计日志
       # 启用后将记录所有文件操作到日志
       audit: true
@@ -85,26 +87,14 @@ tools:
   # MCP (Model Context Protocol) 工具配置
   # ============================================================
   mcp:
-    # MCP 服务器配置文件路径
-    # 该文件定义了可用的 MCP 服务器
-    config_file: mcp_config.yaml
     # 是否自动连接 MCP 服务器
     # 启用后将在启动时自动连接配置的服务器
     auto_connect: true
-    # 工具列表缓存时间（秒）
-    # 缓存期间不会重新获取工具列表
-    cache_ttl: 300
 
   # ============================================================
   # Skills 技能配置
   # ============================================================
-  skills:
-    # 技能配置文件路径
-    # 该文件定义了可用的技能
-    config_file: skills_config.yaml
-    # 是否自动加载技能元数据
-    # 启用后将在启动时自动加载所有技能的元数据
-    auto_load_metadata: true
+  skills: {}
 
   # ============================================================
   # 工具说明文档配置
@@ -113,16 +103,6 @@ tools:
     # 是否自动注入工具说明文档
     # 启用后将在系统提示中自动添加工具使用说明
     auto_inject: true
-    # 文档注入位置
-    # 可选值：
-    #   - after_prompt: 在系统提示之后注入
-    #   - before_prompt: 在系统提示之前注入
-    inject_position: after_prompt
-    # 文档格式
-    # 可选值：
-    #   - markdown: Markdown 格式
-    #   - plain: 纯文本格式
-    format: markdown
     # 是否在文档中包含使用示例
     include_examples: true
 
@@ -145,7 +125,7 @@ tools:
 #         - pip
 #     file_tools:
 #       enabled: true
-#       permission_mode: ask
+#       permission_mode: "ask"
 #       workspace:
 #         main: /home/user/projects/myproject
 #         additional:
@@ -156,25 +136,23 @@ tools:
 #           - "**/dist/**"
 #           - "**/build/**"
 #       permissions:
-#         "src/**": allow
-#         "tests/**": allow
-#         "docs/**": allow
-#         "**/.env": deny
-#         "**/secrets/**": deny
-#         "config/**/*.yaml": ask
+#         "read:*": "allow"
+#         "list:*": "allow"
+#         "search:*": "allow"
+#         "exists:*": "allow"
+#         "write:*.md": "ask"
+#         "write:*.py": "ask"
+#         "write:*.txt": "allow"
+#         "write:*.log": "allow"
+#         "delete:*": "deny"
+#         "move:*": "ask"
 #       audit: true
-#   
+#
 #   mcp:
-#     config_file: mcp_config.yaml
 #     auto_connect: true
-#     cache_ttl: 300
-#   
-#   skills:
-#     config_file: skills_config.yaml
-#     auto_load_metadata: true
-#   
+#
+#   skills: {}
+#
 #   tool_docs:
 #     auto_inject: true
-#     inject_position: after_prompt
-#     format: markdown
 #     include_examples: true

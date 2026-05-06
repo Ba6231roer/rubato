@@ -1,63 +1,51 @@
-servers:
-  playwright:
-    enabled: true
-    command: "npx"
-    args:
-      - "-y"
-      - "@playwright/mcp"
-      - "--caps=testing"
-    
-    connection:
-      retry_times: 3
-      retry_delay: 5
-      timeout: 30
-    
-    browser:
-      type: "chromium"
-      headless: false
-      viewport:
-        width: 1280
-        height: 720
-    
-    execution:
-      default_timeout: 30000
-      slow_mo: 0
-      video_dir: "logs/videos"
-      screenshot_dir: "logs/screenshots"
+mcp:
+  servers:
+    playwright:
+      enabled: true
+      command: "npx"
+      args:
+        - "-y"
+        - "@playwright/mcp"
+        - "--caps=testing"
+      
+      connection:
+        retry_times: 3
+        retry_delay: 5
+        timeout: 30
 
-  # filesystem:
-  #   enabled: true
-  #   command: "npx"
-  #   args:
-  #     - "-y"
-  #     - "@modelcontextprotocol/server-filesystem"
-  #     - "/path/to/allowed/directory"
-  #   
-  #   connection:
-  #     retry_times: 3
-  #     retry_delay: 5
-  #     timeout: 30
+    # filesystem:
+    #   enabled: true
+    #   command: "npx"
+    #   args:
+    #     - "-y"
+    #     - "@modelcontextprotocol/server-filesystem"
+    #     - "/path/to/allowed/directory"
+    #   
+    #   connection:
+    #     retry_times: 3
+    #     retry_delay: 5
+    #     timeout: 30
 
-  # github:
-  #   enabled: true
-  #   command: "npx"
-  #   args:
-  #     - "-y"
-  #     - "@modelcontextprotocol/server-github"
-  #   
-  #   connection:
-  #     retry_times: 3
-  #     retry_delay: 5
-  #     timeout: 30
+    # github:
+    #   enabled: true
+    #   command: "npx"
+    #   args:
+    #     - "-y"
+    #     - "@modelcontextprotocol/server-github"
+    #   
+    #   connection:
+    #     retry_times: 3
+    #     retry_delay: 5
+    #     timeout: 30
 
-  # custom-server:
-  #   enabled: true
-  #   command: "python"
-  #   args:
-  #     - "-m"
-  #     - "my_mcp_server"
-  #   
-  #   connection:
-  #     retry_times: 5
-  #     retry_delay: 10
-  #     timeout: 60
+    # custom-server:
+    #   enabled: true
+    #   command: "python"
+    #   args:
+    #     - "-m"
+    #     - "my_mcp_server"
+    #   
+    #   connection:
+    #     retry_times: 5
+    #     retry_delay: 10
+    #     timeout: 60

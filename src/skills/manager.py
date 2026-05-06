@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Set, Dict
 from dataclasses import dataclass, field
@@ -253,3 +254,21 @@ class SkillManager(SkillLoader):
     def reset_conditional_skills(self) -> None:
         """重置条件 Skills（重新加载）"""
         self.conditional_skills.clear()
+
+    def register_skill_from_agent(
+        self,
+        name: str,
+        description: str,
+        content: str,
+        triggers: Optional[List[str]] = None,
+        category: str = ""
+    ) -> SkillMetadata:
+        metadata = super().register_skill_from_agent(name, description, content, triggers, category)
+        if metadata.paths:
+            conditional_skill = ConditionalSkill(
+                skill=metadata,
+                path_patterns=metadata.paths,
+                content=content,
+            )
+            self.conditional_skills.append(conditional_skill)
+        return metadata

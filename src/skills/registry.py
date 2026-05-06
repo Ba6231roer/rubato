@@ -1,5 +1,6 @@
 from typing import Dict, Optional, List
 from collections import OrderedDict
+from datetime import datetime
 from .parser import SkillMetadata
 
 
@@ -41,6 +42,9 @@ class SkillRegistry:
             for trigger in metadata.triggers:
                 if trigger.lower() in user_input_lower:
                     return name
+        for name in self.skills:
+            if name.lower() in user_input_lower:
+                return name
         return None
 
     def list_skills(self) -> List[SkillMetadata]:
@@ -90,3 +94,15 @@ class SkillRegistry:
         self.max_loaded_skills = limit
         while len(self.skill_contents) > self.max_loaded_skills:
             self._evict_oldest()
+
+    def register_new_skill(self, metadata: SkillMetadata, content: str = "") -> None:
+        self.register(metadata, content)
+
+    def update_skill_content(self, name: str, content: str) -> None:
+        if name in self.skills:
+            self.skills[name].updated_at = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+            self._store_content_with_limit(name, content)
+
+    def invalidate_content_cache(self, name: str) -> None:
+        if name in self.skill_contents:
+            del self.skill_contents[name]

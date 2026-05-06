@@ -240,9 +240,8 @@ class ModelParameters(BaseModel):
     retry_max_count: int = 3
     retry_initial_delay: float = 10.0
     retry_max_delay: float = 60.0
-    llm_timeout: float = 300.0
 
-    @field_validator('retry_max_count', 'retry_initial_delay', 'retry_max_delay', 'llm_timeout')
+    @field_validator('retry_max_count', 'retry_initial_delay', 'retry_max_delay')
     @classmethod
     def validate_positive(cls, v):
         return _validate_positive(v)
@@ -264,40 +263,12 @@ class MCPConnectionConfig(BaseModel):
         return _validate_positive(v)
 
 
-class BrowserViewportConfig(BaseModel):
-    width: int = 1280
-    height: int = 720
-
-
-class BrowserConfig(BaseModel):
-    type: str = "chromium"
-    headless: bool = False
-    viewport: BrowserViewportConfig = BrowserViewportConfig()
-
-
-class ExecutionConfig(BaseModel):
-    default_timeout: int = 30000
-    slow_mo: int = 0
-    video_dir: str = "logs/videos"
-    screenshot_dir: str = "logs/screenshots"
-
-
-class PlaywrightConfig(BaseModel):
-    enabled: bool = True
-    command: str = "npx"
-    args: List[str] = ["-y", "@playwright/mcp"]
-    connection: MCPConnectionConfig = MCPConnectionConfig()
-    browser: BrowserConfig = BrowserConfig()
-    execution: ExecutionConfig = ExecutionConfig()
-
 
 class MCPServerConfig(BaseModel):
     enabled: bool = True
     command: str
     args: List[str] = []
     connection: Optional[dict] = None
-    browser: Optional[dict] = None
-    execution: Optional[dict] = None
 
 
 class MCPConfig(BaseModel):
@@ -317,15 +288,27 @@ class PromptConfig(BaseModel):
 
 
 class SkillLoadingConfig(BaseModel):
-    trigger_matching: bool = True
     max_loaded_skills: int = 3
+
+
+class BackgroundReviewConfig(BaseModel):
+    enabled: bool = False
+    max_iterations: int = 8
+
+
+class SkillSelfImproveConfig(BaseModel):
+    enabled: bool = True
+    max_content_chars: int = 100000
+    backup_enabled: bool = True
+    agent_skills_dir: str = ".self-improved"
+    background_review: BackgroundReviewConfig = BackgroundReviewConfig()
 
 
 class SkillsConfig(BaseModel):
     directory: str = "skills"
-    auto_load: bool = True
     enabled_skills: List[str] = []
     skill_loading: SkillLoadingConfig = SkillLoadingConfig()
+    self_improve: SkillSelfImproveConfig = SkillSelfImproveConfig()
 
 
 class AgentExecutionConfig(BaseModel):
@@ -343,10 +326,7 @@ class AgentExecutionConfig(BaseModel):
 
 class MessageCompressionConfig(BaseModel):
     enabled: bool = True
-    max_tokens: int = 50000
     keep_recent: int = 6
-    summary_max_length: int = 300
-    history_summary_count: int = 10
     autocompact_buffer_tokens: int = 13000
     manual_compact_buffer_tokens: int = 3000
     warning_threshold_buffer_tokens: int = 20000
@@ -356,7 +336,7 @@ class MessageCompressionConfig(BaseModel):
     max_consecutive_failures: int = 3
     skill_stale_timeout_seconds: int = 300
 
-    @field_validator('max_tokens', 'keep_recent', 'summary_max_length', 'history_summary_count',
+    @field_validator('keep_recent',
                      'autocompact_buffer_tokens', 'manual_compact_buffer_tokens',
                      'warning_threshold_buffer_tokens', 'snip_keep_recent',
                      'tool_result_persist_threshold', 'tool_result_budget_per_message',
@@ -416,34 +396,30 @@ class ShellToolConfig(BaseModel):
 class SpawnAgentConfig(BaseModel):
     """spawn_agent工具配置"""
     enabled: bool = True
+    nudge_interval: int = 0
 
 
 class BuiltinToolsConfig(BaseModel):
-    """系统内置工具配置（包含spawn_agent, shell_tool, file_tools）"""
     enabled: bool = True
     spawn_agent: SpawnAgentConfig = SpawnAgentConfig()
     shell_tool: ShellToolConfig = ShellToolConfig()
     file_tools: FileToolsSubConfig = FileToolsSubConfig()
+    skill_manage: SpawnAgentConfig = SpawnAgentConfig()
 
 
 class MCPToolsConfig(BaseModel):
     """MCP工具配置"""
-    config_file: str = "mcp_config.yaml"
     auto_connect: bool = True
-    cache_ttl: int = 300
 
 
 class SkillsToolsConfig(BaseModel):
     """Skill配置"""
-    config_file: str = "skills_config.yaml"
-    auto_load_metadata: bool = True
+    pass
 
 
 class ToolDocsConfig(BaseModel):
     """工具说明文档配置"""
     auto_inject: bool = True
-    inject_position: str = "after_prompt"
-    format: str = "markdown"
     include_examples: bool = True
 
 

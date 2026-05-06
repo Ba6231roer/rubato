@@ -18,8 +18,6 @@ class ContextCompressor:
         manual_compact_buffer_tokens: int = 3000,
         warning_threshold_buffer_tokens: int = 20000,
         keep_recent: int = 6,
-        summary_max_length: int = 300,
-        history_summary_count: int = 10,
         snip_keep_recent: int = 6,
         max_consecutive_failures: int = 3,
         tool_result_storage=None,
@@ -34,8 +32,6 @@ class ContextCompressor:
         self.manual_compact_buffer_tokens = manual_compact_buffer_tokens
         self.warning_threshold_buffer_tokens = warning_threshold_buffer_tokens
         self.keep_recent = keep_recent
-        self.summary_max_length = summary_max_length
-        self.history_summary_count = history_summary_count
         self.snip_keep_recent = snip_keep_recent
         self.max_consecutive_failures = max_consecutive_failures
         self.tool_result_storage = tool_result_storage

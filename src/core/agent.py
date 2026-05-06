@@ -1,6 +1,9 @@
 import re
 import json
+import threading
+import asyncio
 from langchain_core.tools import BaseTool
+from langchain_core.messages import AIMessage, HumanMessage
 from typing import List, Optional
 import time
 
@@ -19,6 +22,16 @@ from ..context.session_storage import SessionStorage
 
 
 
+
+
+_SKILL_REVIEW_PROMPT = (
+    "回顾上述对话，考虑是否需要保存或更新 Skill。"
+    "重点关注：是否使用了需要反复试错才能成功的方法？"
+    "是否在中途因经验发现而改变了策略？"
+    "是否存在某个操作（如点击特定按钮、填写特定输入框）需要多次尝试才能完成？"
+    "如果是，将该方法保存为 Skill 或更新已有 Skill。"
+    "如果没有值得保存的内容，直接说'Nothing to save.'并停止。"
+)
 
 
 class RubatoAgent:
@@ -93,6 +106,15 @@ class RubatoAgent:
         
         self._ensure_spawn_agent_tool()
         
+        self._iters_since_skill_op: int = 0
+        self._skill_nudge_interval: int = 30
+        
+        if self.role_config and hasattr(self.role_config, 'tools') and self.role_config.tools:
+            if hasattr(self.role_config.tools, 'builtin') and self.role_config.tools.builtin:
+                skill_manage_cfg = getattr(self.role_config.tools.builtin, 'skill_manage', None)
+                if skill_manage_cfg and hasattr(skill_manage_cfg, 'nudge_interval') and skill_manage_cfg.nudge_interval > 0:
+                    self._skill_nudge_interval = skill_manage_cfg.nudge_interval
+        
         self._file_state_cache = FileStateCache()
         self._query_engine: QueryEngine = self._create_query_engine()
         
@@ -161,6 +183,7 @@ class RubatoAgent:
             logging_config=self.logging_config,
             session_storage=self._session_storage,
             role_name=self.get_role_name(),
+            on_tool_executed=self._on_tool_executed,
         )
         
         return QueryEngine(query_config)
@@ -237,6 +260,152 @@ class RubatoAgent:
                 "role": self.get_role_name()
             })
     
+    def _on_skill_changed(self, action: str, skill_name: str) -> None:
+        if action in ("create", "patch", "edit"):
+            if self.context_manager.is_skill_loaded(skill_name):
+                skill_content = self.skill_loader.get_skill_content_sync(skill_name)
+                if skill_content:
+                    self._system_prompt_registry.add_skill(skill_name, skill_content)
+                    self._current_system_prompt = self._system_prompt_registry.build()
+                    self._rebuild_query_engine()
+            elif action == "create":
+                self._system_prompt_registry = self._build_system_prompt_registry()
+                self._current_system_prompt = self._system_prompt_registry.build()
+                self._rebuild_query_engine()
+            self.logger.log_agent_action("skill_changed_by_agent", {
+                "action": action,
+                "skill_name": skill_name
+            })
+    
+    def _on_tool_executed(self, tool_name: str) -> None:
+        if tool_name == "skill_manage":
+            self._iters_since_skill_op = 0
+        else:
+            self._iters_since_skill_op += 1
+    
+    def _spawn_skill_review(self, messages_snapshot: list) -> None:
+        if not self._should_run_background_review():
+            return
+
+        max_iterations = self._get_background_review_max_iterations()
+
+        def _run_review():
+            try:
+                review_llm = self._create_llm()
+                review_system_prompt = (
+                    "你是一个 Skill 审查助手。你的任务是审查对话历史，判断是否需要创建或更新 Skill。\n"
+                    "你只能使用 skill_manage 工具。如果不需要保存任何内容，直接说'Nothing to save.'。\n"
+                    f"最多执行 {max_iterations} 轮操作。"
+                )
+
+                review_tools = [t for t in self.tools if t.name == "skill_manage"]
+                if not review_tools:
+                    return
+
+                review_config = QueryEngineConfig(
+                    cwd=str(self.config.project.root) if self.config.project else ".",
+                    llm=review_llm,
+                    tools=review_tools,
+                    skills=[],
+                    can_use_tool=lambda name, args: name == "skill_manage",
+                    get_app_state=lambda: {},
+                    set_app_state=lambda state: None,
+                    initial_messages=[],
+                    custom_system_prompt=review_system_prompt,
+                    max_turns=max_iterations,
+                    model_name=self.config.model.model.name,
+                    temperature=0.3,
+                    compression_enabled=False,
+                    max_context_tokens=self.max_context_tokens,
+                    on_tool_executed=None,
+                    logging_config=self.logging_config,
+                    role_name="skill-review",
+                )
+
+                review_engine = QueryEngine(review_config)
+
+                review_messages = self._load_pre_compression_messages(messages_snapshot)
+                review_messages.append(HumanMessage(content=_SKILL_REVIEW_PROMPT))
+                review_engine.set_messages(review_messages)
+
+                loop = asyncio.new_event_loop()
+                try:
+                    result = loop.run_until_complete(review_engine.run())
+                finally:
+                    loop.close()
+
+                actions = []
+                for msg in review_engine.mutable_messages:
+                    if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls'):
+                        for tc in msg.tool_calls:
+                            if tc.get('name') == 'skill_manage':
+                                args = tc.get('args', {})
+                                action = args.get('action', '')
+                                name = args.get('name', '')
+                                if action and name:
+                                    actions.append(f"Skill '{name}' {action}d")
+
+                if actions:
+                    summary = " · ".join(dict.fromkeys(actions))
+                    self.logger.log_agent_action("skill_review_completed", {
+                        "actions": actions
+                    })
+                    print(f"  💾 {summary}")
+
+            except Exception as e:
+                self.logger.log_agent_action("skill_review_failed", {"error": str(e)})
+
+        t = threading.Thread(target=_run_review, daemon=True, name="skill-review")
+        t.start()
+    
+    def _load_pre_compression_messages(self, fallback_messages: list) -> list:
+        if self._session_storage and self._query_engine:
+            try:
+                session_id = getattr(self._query_engine, '_session_id', None)
+                if session_id:
+                    full_messages = self._session_storage.load_session(session_id)
+                    if full_messages:
+                        self.logger.log_agent_action("skill_review_using_pre_compression_messages", {
+                            "message_count": len(full_messages)
+                        })
+                        return full_messages
+            except Exception as e:
+                self.logger.log_agent_action("skill_review_fallback_to_compressed", {
+                    "reason": str(e)
+                })
+        return list(fallback_messages)
+
+    def _should_run_background_review(self) -> bool:
+        try:
+            si = self.config.skills.self_improve if hasattr(self.config, 'skills') and hasattr(self.config.skills, 'self_improve') else None
+            if si and hasattr(si, 'background_review') and si.background_review:
+                return si.background_review.enabled
+        except Exception:
+            pass
+        return False
+    
+    def _get_background_review_max_iterations(self) -> int:
+        try:
+            si = self.config.skills.self_improve if hasattr(self.config, 'skills') and hasattr(self.config.skills, 'self_improve') else None
+            if si and hasattr(si, 'background_review') and si.background_review:
+                return si.background_review.max_iterations
+        except Exception:
+            pass
+        return 8
+    
+    def _check_skill_manage_calls(self) -> None:
+        if not self._query_engine:
+            return
+        for msg in self._query_engine.mutable_messages:
+            if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls'):
+                for tc in msg.tool_calls:
+                    if tc.get('name') == 'skill_manage':
+                        args = tc.get('args', {})
+                        self._on_skill_changed(
+                            args.get('action', ''),
+                            args.get('name', '')
+                        )
+    
     def _load_system_prompt(self) -> str:
         if self.role_config and self.role_config.system_prompt_file:
             prompt_file = self.role_config.system_prompt_file
@@ -268,7 +437,7 @@ class RubatoAgent:
             tool_name = tool.name
             builtin_names = {'spawn_agent', 'shell_tool', 'file_read', 'file_write', 
                             'file_list', 'file_search', 'file_exists', 'file_mkdir', 
-                            'file_replace', 'file_delete'}
+                            'file_replace', 'file_delete', 'skill_manage'}
             if tool_name in builtin_names:
                 builtin_tools.append(tool_name)
         
@@ -308,7 +477,8 @@ class RubatoAgent:
             builtin_tools=builtin_tools,
             mcp_tools=mcp_tools,
             skills=skills,
-            include_examples=include_examples
+            include_examples=include_examples,
+            has_skill_manage=any(t.name == 'skill_manage' for t in all_tools)
         )
     
     def _build_system_prompt_with_skills(self, base_prompt: str) -> str:
@@ -497,6 +667,17 @@ class RubatoAgent:
                 "cost_usd": usage.cost_usd
             })
             
+            self._check_skill_manage_calls()
+            
+            if self._skill_nudge_interval > 0 and self._iters_since_skill_op >= self._skill_nudge_interval:
+                if self._should_run_background_review():
+                    messages_snapshot = list(self._query_engine.mutable_messages) if self._query_engine else []
+                    self._spawn_skill_review(messages_snapshot)
+                else:
+                    nudge_msg = f"\n\n💡 提示：本轮对话已执行 {self._iters_since_skill_op} 次工具调用。如果你遇到了需要反复尝试才能成功的操作，可以使用 skill_manage(action='create') 保存为 Skill 以便复用。常规操作不需要保存。"
+                    final_content += nudge_msg
+                self._iters_since_skill_op = 0
+            
             return final_content if final_content else "任务已完成"
             
         except Exception as e:
@@ -608,6 +789,17 @@ class RubatoAgent:
                 "cost_usd": usage.cost_usd
             })
             
+            self._check_skill_manage_calls()
+            
+            if self._skill_nudge_interval > 0 and self._iters_since_skill_op >= self._skill_nudge_interval:
+                if self._should_run_background_review():
+                    messages_snapshot = list(self._query_engine.mutable_messages) if self._query_engine else []
+                    self._spawn_skill_review(messages_snapshot)
+                else:
+                    nudge_msg = f"\n\n💡 提示：本轮对话已执行 {self._iters_since_skill_op} 次工具调用。如果你遇到了需要反复尝试才能成功的操作，可以使用 skill_manage(action='create') 保存为 Skill 以便复用。常规操作不需要保存。"
+                    yield nudge_msg
+                self._iters_since_skill_op = 0
+            
             if not final_content:
                 yield "任务已完成"
             
@@ -697,6 +889,17 @@ class RubatoAgent:
                 "total_tokens": usage.total_tokens,
                 "cost_usd": usage.cost_usd
             })
+            
+            self._check_skill_manage_calls()
+            
+            if self._skill_nudge_interval > 0 and self._iters_since_skill_op >= self._skill_nudge_interval:
+                if self._should_run_background_review():
+                    messages_snapshot = list(self._query_engine.mutable_messages) if self._query_engine else []
+                    self._spawn_skill_review(messages_snapshot)
+                else:
+                    nudge_msg = f"\n\n💡 提示：本轮对话已执行 {self._iters_since_skill_op} 次工具调用。如果你遇到了需要反复尝试才能成功的操作，可以使用 skill_manage(action='create') 保存为 Skill 以便复用。常规操作不需要保存。"
+                    yield SDKMessage.assistant(nudge_msg)
+                self._iters_since_skill_op = 0
             
         except Exception as e:
             import traceback

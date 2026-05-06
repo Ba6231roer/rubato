@@ -412,7 +412,9 @@ Skill管理：
             if self.agent_pool:
                 new_tool_registry = self.agent_pool._create_tool_registry(
                     mcp_manager=getattr(self.agent, '_mcp_manager', None),
-                    role_config=role
+                    role_config=role,
+                    skill_loader=getattr(self.agent, 'skill_loader', None),
+                    on_skill_changed=self.agent._on_skill_changed
                 )
                 self.agent.role_config = role
                 self.agent.reload_tools(new_tool_registry)

@@ -12,173 +12,120 @@ skills:
   # 存放技能定义文件（.md 文件）的目录
   # 支持相对路径（相对于项目根目录）或绝对路径
   directory: "skills"
-  
-  # 不同场景示例：
-  # - 使用自定义技能目录
-  # directory: "custom_skills"
-  
-  # - 使用绝对路径
-  # directory: "/home/user/skills"
-  
-  # - 使用多级目录
-  # directory: "config/skills/active"
-
-  # ========================================
-  # 自动加载配置
-  # ========================================
-  # 是否在启动时自动加载所有技能
-  auto_load: true
-  
-  # 不同场景示例：
-  # - 禁用自动加载（手动管理技能）
-  # auto_load: false
-  
-  # - 启用自动加载（推荐用于开发环境）
-  # auto_load: true
 
   # ========================================
   # 启用的技能列表
   # ========================================
   # 指定要启用的技能名称列表
   # 技能名称对应技能文件名（不含 .md 扩展名）
-  # 如果 auto_load 为 true，此列表用于筛选要加载的技能
-  # 如果 auto_load 为 false，只加载此列表中的技能
   enabled_skills:
     - test-execution      # 测试执行技能
     - playwright-cli      # Playwright CLI 技能
     - knowledge-query     # 知识库查询技能
-  
-  # 不同场景示例：
-  # - Web 测试项目
-  # enabled_skills:
-  #   - test-execution
-  #   - playwright-cli
-  #   - browser-automation
-  
-  # - API 测试项目
-  # enabled_skills:
-  #   - api-testing
-  #   - data-validation
-  #   - knowledge-query
-  
-  # - 文档生成项目
-  # enabled_skills:
-  #   - doc-generator
-  #   - code-analyzer
-  #   - markdown-writer
-  
-  # - 空列表（不启用任何技能）
-  # enabled_skills: []
-  
-  # - 启用所有技能（仅在 auto_load: true 时有效）
-  # enabled_skills: []  # 空列表 + auto_load: true = 加载所有技能
 
   # ========================================
   # 技能加载配置
   # ========================================
   skill_loading:
-    # 是否启用触发器匹配
-    # 启用后，系统会根据用户输入自动匹配并加载相关技能
-    # 触发器定义在技能文件的 frontmatter 中
-    trigger_matching: true
-    
-    # 不同场景示例：
-    # - 启用智能匹配（推荐）
-    # trigger_matching: true
-    
-    # - 禁用智能匹配（手动控制）
-    # trigger_matching: false
-    
     # 最大已加载技能数量
     # 限制同时加载的技能数量，避免上下文过大
     # 当达到上限时，会卸载最久未使用的技能
     max_loaded_skills: 3
-    
-    # 不同场景示例：
-    # - 单技能场景
-    # max_loaded_skills: 1
-    
-    # - 多技能协作场景
-    # max_loaded_skills: 5
-    
-    # - 无限制（不推荐，可能导致上下文过大）
-    # max_loaded_skills: 10
+
+  # ========================================
+  # 自我改进配置
+  # ========================================
+  # 控制运行时 Skill 的自动创建/更新行为。
+  # 工作机制：Agent 执行工具调用时，内部计数器累加。当达到 nudge_interval 阈值时，
+  # 根据 background_review.enabled 决定触发方式：
+  #   - background_review.enabled=false: 向 Agent 返回一条 nudge 提示，由 Agent 自行判断是否调用 skill_manage
+  #   - background_review.enabled=true:  后台 fork 一个审查 Agent，独立审查对话历史并决定是否创建/更新 Skill
+  # 无论哪种方式，都只有"需要反复尝试才能成功的操作"才应保存为 Skill，常规流程不会产生 Skill。
+  #
+  # 典型测试案例场景分析（30~50 步骤，60+ 工具调用）：
+  #   - 大部分工具调用是 playwright-cli + file_read 的常规操作序列（点击→截图→读结果），
+  #     属于流程性操作，不涉及试错，不会也不应产生 Skill。
+  #   - 只有遇到难以定位的元素、需要特殊 CSS 选择器技巧、或需要多轮调试才能通过的步骤，
+  #     才可能触发 Skill 保存。
+  #   - nudge_interval=30 意味着约每 30 次工具调用才触发一次审查/提示，
+  #     对于 60+ 次调用的案例，最多触发 2 次，不会导致"每个案例都变成 Skill"。
+  #   - 可在测试案例文档中添加 [参考skill] 章节引用 Skill 名称，
+  #     下次执行该案例时会自动加载对应 Skill 的完整内容。
+  self_improve:
+    # nudge_interval: 多少次工具调用后触发一次 Skill 审查/提示
+    # 设为 0 可禁用自动触发，仅依赖 Agent 主动调用 skill_manage
+    # 推荐值：
+    #   - 30（默认）：适合测试案例执行场景，避免频繁触发
+    #   - 10~15：适合探索性交互场景，更积极地发现可复用经验
+    #   - 0：完全禁用自动触发
+    nudge_interval: 30
+
+    # background_review: 后台审查 Agent 配置
+    # 启用后，达到 nudge_interval 阈值时会在后台线程 fork 一个独立的审查 Agent，
+    # 该 Agent 拥有 skill_manage 工具，审查完整对话历史（包括被上下文压缩清理前的内容），
+    # 自行决定是否创建或更新 Skill。
+    # 注意：每次触发会额外消耗 LLM token（审查 Agent 独立运行，最多 max_iterations 轮）
+    background_review:
+      # enabled: 是否启用后台审查模式
+      # false = nudge 模式（在 Agent 响应末尾追加提示，由 Agent 自行决策）
+      # true  = 后台审查模式（独立 Agent 在后台审查，不干扰主 Agent 流程）
+      enabled: false
+
+      # max_iterations: 后台审查 Agent 的最大推理轮数
+      # 每轮可能包含一次工具调用（如 skill_manage create/patch）
+      # 8 轮足够完成 1~2 个 Skill 的创建或更新
+      max_iterations: 8
 
 # ========================================
 # 完整配置示例
 # ========================================
 
-# 示例 1: Web 自动化测试项目
+# 示例 1: Web 自动化测试项目（推荐）
 # skills:
 #   directory: "skills"
-#   auto_load: true
 #   enabled_skills:
 #     - test-execution
 #     - playwright-cli
-#     - browser-automation
-#     - screenshot-analyzer
 #   skill_loading:
-#     trigger_matching: true
-#     max_loaded_skills: 4
-
-# 示例 2: API 测试项目
-# skills:
-#   directory: "skills/api"
-#   auto_load: true
-#   enabled_skills:
-#     - api-testing
-#     - data-validation
-#     - response-analyzer
-#   skill_loading:
-#     trigger_matching: true
 #     max_loaded_skills: 3
+#   self_improve:
+#     nudge_interval: 30
+#     background_review:
+#       enabled: false
 
-# 示例 3: 文档生成项目
+# 示例 2: 启用后台审查（适合长对话/探索性任务）
 # skills:
-#   directory: "skills/docs"
-#   auto_load: false
+#   directory: "skills"
 #   enabled_skills:
-#     - doc-generator
-#     - code-analyzer
+#     - test-execution
+#     - playwright-cli
 #   skill_loading:
-#     trigger_matching: false
-#     max_loaded_skills: 2
+#     max_loaded_skills: 3
+#   self_improve:
+#     nudge_interval: 30
+#     background_review:
+#       enabled: true
+#       max_iterations: 8
 
-# 示例 4: 开发环境（启用所有技能）
+# 示例 3: 禁用自我改进
 # skills:
 #   directory: "skills"
-#   auto_load: true
-#   enabled_skills: []  # 空列表表示加载所有技能
-#   skill_loading:
-#     trigger_matching: true
-#     max_loaded_skills: 5
-
-# 示例 5: 生产环境（最小化配置）
-# skills:
-#   directory: "skills"
-#   auto_load: false
 #   enabled_skills:
 #     - test-execution
 #   skill_loading:
-#     trigger_matching: false
-#     max_loaded_skills: 1
+#     max_loaded_skills: 2
+#   self_improve:
+#     nudge_interval: 0
 
-# ========================================
-# 技能文件格式说明
-# ========================================
-# 技能文件应放置在指定的 directory 目录中
-# 文件格式为 Markdown (.md)，包含 frontmatter 元数据
-# 
-# 示例技能文件结构：
-# ---
-# name: test-execution
-# description: 执行测试用例并生成报告
-# triggers:
-#   - "执行测试"
-#   - "运行测试"
-#   - "test"
-# ---
-# 
-# # Test Execution Skill
-# 
-# 此技能用于执行测试用例...
+# 示例 4: API 测试项目
+# skills:
+#   directory: "skills/api"
+#   enabled_skills:
+#     - api-testing
+#     - data-validation
+#   skill_loading:
+#     max_loaded_skills: 3
+#   self_improve:
+#     nudge_interval: 30
+#     background_review:
+#       enabled: false
