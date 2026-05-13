@@ -995,10 +995,12 @@ class SubAgentManager:
                 final_result = message.content if isinstance(message.content, str) else str(message.content)
             elif message.type == "error":
                 error_content = message.content
-                if isinstance(error_content, dict):
-                    raise Exception(error_content.get("message", str(error_content)))
-                else:
-                    raise Exception(str(error_content))
+                error_msg = error_content.get("message", str(error_content)) if isinstance(error_content, dict) else str(error_content)
+                fallback = query_engine._get_final_result()
+                if fallback and fallback != "任务已完成":
+                    final_result = fallback
+                    break
+                raise Exception(error_msg)
         
         if final_result is None:
             final_result = query_engine._get_final_result()

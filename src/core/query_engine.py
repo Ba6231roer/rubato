@@ -612,6 +612,7 @@ class QueryEngine:
                         metadata={"phase": "final", "reason": "task_complete" if task_seems_complete else "max_no_tool_turns"}
                     )
                     await self._persist_new_messages()
+                    yield SDKMessage.result(result=llm_response.content)
                     break
                 else:
                     tool_names = list(self._tool_map.keys())
@@ -1026,6 +1027,8 @@ class QueryEngine:
             if isinstance(msg, AIMessage):
                 content = msg.content
                 if isinstance(content, str):
+                    if not content.strip():
+                        continue
                     return content
                 elif isinstance(content, list):
                     for item in content:
@@ -1033,6 +1036,8 @@ class QueryEngine:
                             return item["text"]
                         elif isinstance(item, str):
                             return item
+                elif content is None:
+                    continue
         return "任务已完成"
     
     def interrupt(self, reason: Optional[str] = None) -> None:
