@@ -163,8 +163,9 @@ class RoleExecutionConfig(BaseModel):
     timeout: int = 300
     recursion_limit: Optional[int] = None
     sub_agent_recursion_limit: Optional[int] = None
+    max_parallel_spawn: int = 1
 
-    @field_validator('max_context_tokens', 'timeout')
+    @field_validator('max_context_tokens', 'timeout', 'max_parallel_spawn')
     @classmethod
     def validate_positive(cls, v):
         return _validate_positive(v)

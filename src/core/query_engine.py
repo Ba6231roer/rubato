@@ -8,7 +8,7 @@ import asyncio
 import json
 import os
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, field as dataclass_field
 from datetime import datetime
 from typing import (
     Any,
@@ -31,8 +31,34 @@ from ..context.system_prompt_registry import SystemPromptRegistry
 from ..context.task_intent_manager import TaskIntentManager
 from ..context.tool_result_storage import ToolResultStorage, ContentReplacementState
 from ..skills.parser import SkillMetadata
+from ..tools.concurrency import is_concurrency_safe
 from ..utils.logger import get_llm_logger
 from .llm_wrapper import LLMCaller
+
+
+@dataclass
+class ToolCallBatch:
+    is_concurrent: bool
+    calls: List[Dict[str, Any]] = dataclass_field(default_factory=list)
+
+
+def _partition_tool_calls(tool_calls: List[Dict[str, Any]], max_parallel_spawn: int = 1) -> List[ToolCallBatch]:
+    batches: List[ToolCallBatch] = []
+    for tc in tool_calls:
+        tool_name = tc.get("name", "")
+        safe = is_concurrency_safe(tool_name)
+        if batches and batches[-1].is_concurrent == safe:
+            batches[-1].calls.append(tc)
+        else:
+            batches.append(ToolCallBatch(is_concurrent=safe, calls=[tc]))
+    split_batches: List[ToolCallBatch] = []
+    for batch in batches:
+        if batch.is_concurrent and batch.calls and batch.calls[0].get("name") == "spawn_agent" and len(batch.calls) > max_parallel_spawn:
+            for i in range(0, len(batch.calls), max_parallel_spawn):
+                split_batches.append(ToolCallBatch(is_concurrent=True, calls=batch.calls[i:i + max_parallel_spawn]))
+        else:
+            split_batches.append(batch)
+    return split_batches
 
 
 @dataclass
@@ -217,6 +243,7 @@ class QueryEngineConfig:
     task_intent_full_threshold: int = 2000
     task_intent_token_budget: int = 10000
     on_tool_executed: Optional[Callable[[str], None]] = None
+    max_parallel_spawn: int = 1
 
 
 class QueryEngine:
@@ -625,95 +652,202 @@ class QueryEngine:
                 }
             )
             
-            for tool_call in llm_response.tool_calls:
-                tool_name = tool_call.get("name")
-                tool_args = tool_call.get("args", {})
-                tool_call_id = tool_call.get("id")
-                
-                if not self.config.can_use_tool(tool_name, tool_args):
-                    denial_reason = f"工具 '{tool_name}' 权限被拒绝"
-                    self.add_permission_denial(tool_name, denial_reason)
+            batches = _partition_tool_calls(llm_response.tool_calls, self.config.max_parallel_spawn)
+            
+            for batch in batches:
+                if batch.is_concurrent and len(batch.calls) > 1:
+                    for tc in batch.calls:
+                        yield SDKMessage.assistant(
+                            content="",
+                            metadata={
+                                "phase": "tool_executing",
+                                "tool_name": tc.get("name")
+                            }
+                        )
+
+                    async def _exec_single(tc: Dict[str, Any]) -> Dict[str, Any]:
+                        tool_name = tc.get("name")
+                        tool_args = tc.get("args", {})
+                        tool_call_id = tc.get("id")
+                        
+                        if not self.config.can_use_tool(tool_name, tool_args):
+                            denial_reason = f"工具 '{tool_name}' 权限被拒绝"
+                            self.add_permission_denial(tool_name, denial_reason)
+                            return {
+                                "tool_name": tool_name,
+                                "tool_call_id": tool_call_id,
+                                "status": "denied",
+                                "result": f"权限拒绝: {denial_reason}",
+                                "tool_result_content": f"权限拒绝: {denial_reason}",
+                            }
+                        
+                        tool_instance = self._tool_map.get(tool_name)
+                        if tool_instance is None:
+                            error_msg = f"工具 '{tool_name}' 不存在"
+                            return {
+                                "tool_name": tool_name,
+                                "tool_call_id": tool_call_id,
+                                "status": "error",
+                                "result": error_msg,
+                                "tool_result_content": error_msg,
+                            }
+                        
+                        try:
+                            preprocessed_args = self._preprocess_tool_args(tool_name, tool_args)
+                            result = await self._execute_tool_safe(
+                                tool_instance,
+                                preprocessed_args,
+                                tool_call_id
+                            )
+                            return {
+                                "tool_name": tool_name,
+                                "tool_call_id": tool_call_id,
+                                "status": "success",
+                                "result": result,
+                                "tool_result_content": str(result),
+                            }
+                        except Exception as e:
+                            error_msg = self._build_format_hint(
+                                tool_name, tool_args, f"工具执行错误: {str(e)}"
+                            )
+                            return {
+                                "tool_name": tool_name,
+                                "tool_call_id": tool_call_id,
+                                "status": "error",
+                                "result": error_msg,
+                                "tool_result_content": error_msg,
+                            }
                     
-                    tool_result_msg = ToolMessage(
-                        content=f"权限拒绝: {denial_reason}",
-                        tool_call_id=tool_call_id
-                    )
-                    self.mutable_messages.append(tool_result_msg)
-                    
-                    yield SDKMessage.tool_result(
-                        tool_name=tool_name,
-                        result=f"权限拒绝: {denial_reason}",
-                        tool_call_id=tool_call_id,
-                        status="denied"
-                    )
-                    continue
-                
-                tool_instance = self._tool_map.get(tool_name)
-                if tool_instance is None:
-                    error_msg = f"工具 '{tool_name}' 不存在"
-                    tool_result_msg = ToolMessage(
-                        content=error_msg,
-                        tool_call_id=tool_call_id
-                    )
-                    self.mutable_messages.append(tool_result_msg)
-                    
-                    yield SDKMessage.tool_result(
-                        tool_name=tool_name,
-                        result=error_msg,
-                        tool_call_id=tool_call_id,
-                        status="error"
-                    )
-                    continue
-                
-                try:
-                    yield SDKMessage.assistant(
-                        content="",
-                        metadata={
-                            "phase": "tool_executing",
-                            "tool_name": tool_name
-                        }
+                    gather_results = await asyncio.gather(
+                        *[_exec_single(tc) for tc in batch.calls],
+                        return_exceptions=True
                     )
                     
-                    preprocessed_args = self._preprocess_tool_args(tool_name, tool_args)
-                    
-                    result = await self._execute_tool_safe(
-                        tool_instance,
-                        preprocessed_args,
-                        tool_call_id
-                    )
-                    
-                    tool_result_msg = ToolMessage(
-                        content=str(result),
-                        tool_call_id=tool_call_id
-                    )
-                    self.mutable_messages.append(tool_result_msg)
-                    
-                    yield SDKMessage.tool_result(
-                        tool_name=tool_name,
-                        result=result,
-                        tool_call_id=tool_call_id,
-                        status="success"
-                    )
-                    
-                    if self.config.on_tool_executed:
-                        self.config.on_tool_executed(tool_name)
-                    
-                except Exception as e:
-                    error_msg = self._build_format_hint(
-                        tool_name, tool_args, f"工具执行错误: {str(e)}"
-                    )
-                    tool_result_msg = ToolMessage(
-                        content=error_msg,
-                        tool_call_id=tool_call_id
-                    )
-                    self.mutable_messages.append(tool_result_msg)
-                    
-                    yield SDKMessage.tool_result(
-                        tool_name=tool_name,
-                        result=error_msg,
-                        tool_call_id=tool_call_id,
-                        status="error"
-                    )
+                    for i, tc in enumerate(batch.calls):
+                        tool_name = tc.get("name")
+                        tool_call_id = tc.get("id")
+                        r = gather_results[i]
+                        
+                        if isinstance(r, Exception):
+                            error_msg = f"工具执行异常: {str(r)}"
+                            tool_result_msg = ToolMessage(
+                                content=error_msg,
+                                tool_call_id=tool_call_id
+                            )
+                            self.mutable_messages.append(tool_result_msg)
+                            yield SDKMessage.tool_result(
+                                tool_name=tool_name,
+                                result=error_msg,
+                                tool_call_id=tool_call_id,
+                                status="error"
+                            )
+                            continue
+                        
+                        tool_result_msg = ToolMessage(
+                            content=r["tool_result_content"],
+                            tool_call_id=r["tool_call_id"]
+                        )
+                        self.mutable_messages.append(tool_result_msg)
+                        
+                        yield SDKMessage.tool_result(
+                            tool_name=r["tool_name"],
+                            result=r["result"],
+                            tool_call_id=r["tool_call_id"],
+                            status=r["status"]
+                        )
+                        
+                        if r["status"] == "success" and self.config.on_tool_executed:
+                            self.config.on_tool_executed(r["tool_name"])
+                else:
+                    for tc in batch.calls:
+                        tool_name = tc.get("name")
+                        tool_args = tc.get("args", {})
+                        tool_call_id = tc.get("id")
+                        
+                        if not self.config.can_use_tool(tool_name, tool_args):
+                            denial_reason = f"工具 '{tool_name}' 权限被拒绝"
+                            self.add_permission_denial(tool_name, denial_reason)
+                            
+                            tool_result_msg = ToolMessage(
+                                content=f"权限拒绝: {denial_reason}",
+                                tool_call_id=tool_call_id
+                            )
+                            self.mutable_messages.append(tool_result_msg)
+                            
+                            yield SDKMessage.tool_result(
+                                tool_name=tool_name,
+                                result=f"权限拒绝: {denial_reason}",
+                                tool_call_id=tool_call_id,
+                                status="denied"
+                            )
+                            continue
+                        
+                        tool_instance = self._tool_map.get(tool_name)
+                        if tool_instance is None:
+                            error_msg = f"工具 '{tool_name}' 不存在"
+                            tool_result_msg = ToolMessage(
+                                content=error_msg,
+                                tool_call_id=tool_call_id
+                            )
+                            self.mutable_messages.append(tool_result_msg)
+                            
+                            yield SDKMessage.tool_result(
+                                tool_name=tool_name,
+                                result=error_msg,
+                                tool_call_id=tool_call_id,
+                                status="error"
+                            )
+                            continue
+                        
+                        try:
+                            yield SDKMessage.assistant(
+                                content="",
+                                metadata={
+                                    "phase": "tool_executing",
+                                    "tool_name": tool_name
+                                }
+                            )
+                            
+                            preprocessed_args = self._preprocess_tool_args(tool_name, tool_args)
+                            
+                            result = await self._execute_tool_safe(
+                                tool_instance,
+                                preprocessed_args,
+                                tool_call_id
+                            )
+                            
+                            tool_result_msg = ToolMessage(
+                                content=str(result),
+                                tool_call_id=tool_call_id
+                            )
+                            self.mutable_messages.append(tool_result_msg)
+                            
+                            yield SDKMessage.tool_result(
+                                tool_name=tool_name,
+                                result=result,
+                                tool_call_id=tool_call_id,
+                                status="success"
+                            )
+                            
+                            if self.config.on_tool_executed:
+                                self.config.on_tool_executed(tool_name)
+                            
+                        except Exception as e:
+                            error_msg = self._build_format_hint(
+                                tool_name, tool_args, f"工具执行错误: {str(e)}"
+                            )
+                            tool_result_msg = ToolMessage(
+                                content=error_msg,
+                                tool_call_id=tool_call_id
+                            )
+                            self.mutable_messages.append(tool_result_msg)
+                            
+                            yield SDKMessage.tool_result(
+                                tool_name=tool_name,
+                                result=error_msg,
+                                tool_call_id=tool_call_id,
+                                status="error"
+                            )
             
             yield SDKMessage.assistant(
                 content="",

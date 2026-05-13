@@ -1166,6 +1166,11 @@ def create_spawn_agent_tool(sub_agent_manager: SubAgentManager):
                 "data-processor",
                 "处理这批数据并生成报告"
             )
+            
+            # 并行调用多个子智能体（在单次响应中同时发起多个 spawn_agent 调用）
+            result1 = spawn_agent("test-case-executor", "执行测试案例：登录功能")
+            result2 = spawn_agent("test-case-executor", "执行测试案例：搜索功能")
+            result3 = spawn_agent("test-case-executor", "执行测试案例：购物车功能")
         """
         inheritance_mode = None
         if tool_inheritance:

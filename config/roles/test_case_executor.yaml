@@ -5,7 +5,7 @@ model:
   inherit: true
 execution:
   max_context_tokens: 200000
-  timeout: 300
+  timeout: 600
   recursion_limit: 1000
   sub_agent_recursion_limit: 500
 tools:

@@ -184,6 +184,7 @@ class RubatoAgent:
             session_storage=self._session_storage,
             role_name=self.get_role_name(),
             on_tool_executed=self._on_tool_executed,
+            max_parallel_spawn=self._get_max_parallel_spawn(),
         )
         
         return QueryEngine(query_config)
@@ -978,6 +979,11 @@ class RubatoAgent:
             "max_context_tokens": {"old": old_values["max_context_tokens"], "new": self.max_context_tokens}
         }
     
+    def _get_max_parallel_spawn(self) -> int:
+        if self.role_config and self.role_config.execution and self.role_config.execution.max_parallel_spawn:
+            return self.role_config.execution.max_parallel_spawn
+        return 1
+
     def reload_system_prompt(self, role_config: Optional[RoleConfig] = None) -> None:
         if role_config is not None:
             self.role_config = role_config
