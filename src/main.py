@@ -492,15 +492,11 @@ async def run_web_mode(port: int = 8000) -> None:
         sys.exit(1)
     
     print("正在加载Skills...")
-    enabled_skills = config.skills.enabled_skills if config.skills else None
-    max_loaded_skills = 3
-    if config.skills and config.skills.skill_loading:
-        max_loaded_skills = config.skills.skill_loading.max_loaded_skills
+    disabled_skills = config.skills.disabled_skills if config.skills else None
     
     skill_loader = SkillLoader(
         skills_dir=config.skills.directory,
-        enabled_skills=enabled_skills,
-        max_loaded_skills=max_loaded_skills
+        disabled_skills=disabled_skills
     )
     await skill_loader.load_skill_metadata()
     
@@ -602,15 +598,11 @@ async def main_async() -> None:
         sys.exit(1)
     
     print("正在加载Skills...")
-    enabled_skills = config.skills.enabled_skills if config.skills else None
-    max_loaded_skills = 3
-    if config.skills and config.skills.skill_loading:
-        max_loaded_skills = config.skills.skill_loading.max_loaded_skills
+    disabled_skills = config.skills.disabled_skills if config.skills else None
     
     skill_loader = SkillLoader(
         skills_dir=config.skills.directory,
-        enabled_skills=enabled_skills,
-        max_loaded_skills=max_loaded_skills
+        disabled_skills=disabled_skills
     )
     await skill_loader.load_skill_metadata()
     

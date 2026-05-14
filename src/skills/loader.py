@@ -12,13 +12,11 @@ class SkillLoader:
     def __init__(
         self,
         skills_dir: str,
-        enabled_skills: Optional[List[str]] = None,
-        max_loaded_skills: int = 3
+        disabled_skills: Optional[List[str]] = None,
     ):
         self.skills_dir = Path(skills_dir)
-        self.enabled_skills: Set[str] = set(enabled_skills) if enabled_skills else set()
-        self.max_loaded_skills = max_loaded_skills
-        self.registry = SkillRegistry(max_loaded_skills=max_loaded_skills)
+        self.disabled_skills: Set[str] = set(disabled_skills) if disabled_skills else set()
+        self.registry = SkillRegistry()
         self.parser = SkillParser()
 
     def _load_skills_from_dir(
@@ -37,7 +35,7 @@ class SkillLoader:
             try:
                 metadata, content = self.parser.parse_file(skill_file)
                 if metadata.name:
-                    if self.enabled_skills and metadata.name not in self.enabled_skills:
+                    if self.disabled_skills and metadata.name in self.disabled_skills:
                         continue
                     if skip_existing and self.registry.has_skill(metadata.name):
                         continue
@@ -55,7 +53,7 @@ class SkillLoader:
             try:
                 metadata, content = self.parser.parse_file(skill_file)
                 if metadata.name:
-                    if self.enabled_skills and metadata.name not in self.enabled_skills:
+                    if self.disabled_skills and metadata.name in self.disabled_skills:
                         continue
                     if skip_existing and self.registry.has_skill(metadata.name):
                         continue
@@ -69,8 +67,8 @@ class SkillLoader:
     async def load_skill_metadata(self) -> List[SkillMetadata]:
         """启动时加载所有Skill的元数据
 
-        如果 enabled_skills 非空，只加载列表中指定的 skill
-        如果 enabled_skills 为空，加载目录下所有 skill
+        如果 disabled_skills 非空，排除列表中指定的 skill
+        如果 disabled_skills 为空，加载目录下所有 skill
         """
         return self._load_skills_from_dir(self.skills_dir)
 
@@ -144,10 +142,10 @@ class SkillLoader:
         return self.registry.get_loaded_count()
 
     def is_skill_enabled(self, skill_name: str) -> bool:
-        """检查Skill是否在启用列表中"""
-        if not self.enabled_skills:
+        """检查Skill是否在禁用列表中"""
+        if not self.disabled_skills:
             return True
-        return skill_name in self.enabled_skills
+        return skill_name not in self.disabled_skills
 
     def has_skill(self, skill_name: str) -> bool:
         """检查Skill是否存在"""

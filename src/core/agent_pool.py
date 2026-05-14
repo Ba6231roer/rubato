@@ -122,18 +122,14 @@ class AgentPool:
         return ContextManager()
 
     def _create_skill_loader(self) -> SkillLoader:
-        enabled_skills = None
-        max_loaded_skills = 3
+        disabled_skills = None
         
         if self.config.skills:
-            enabled_skills = self.config.skills.enabled_skills
-            if self.config.skills.skill_loading:
-                max_loaded_skills = self.config.skills.skill_loading.max_loaded_skills
+            disabled_skills = self.config.skills.disabled_skills
         
         return SkillLoader(
             skills_dir=self.skills_dir,
-            enabled_skills=enabled_skills,
-            max_loaded_skills=max_loaded_skills
+            disabled_skills=disabled_skills
         )
 
     def _create_tool_registry(

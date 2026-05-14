@@ -448,7 +448,6 @@ rubato/
 │   │   ├── test_case_generator.txt
 │   │   ├── test_case_executor.txt
 │   │   └── test_suite_executor.txt
-│   ├── skill_loading_prompt.txt   # Skill加载提示词
 │   └── system_prompt.txt          # 系统提示词
 ├── skills/                        # Skill文件目录
 │   ├── knowledge-query.md         # 知识查询Skill
@@ -894,8 +893,7 @@ tool_docs:
 
 **关键参数**:
 
-- `enabled_skills`: 白名单，非空时只加载列表中的skill
-- `max_loaded_skills`: LRU缓存限制，最多缓存N个skill内容
+- `disabled_skills`: 黑名单，非空时跳过列表中的skill
 
 **关键方法**:
 
@@ -908,19 +906,18 @@ tool_docs:
 
 1. 启动时：通过 `SkillParser` 加载YAML头（元数据）
 2. 对话中：根据触发词匹配，按需加载完整内容
-3. 缓存管理：使用LRU策略，超过限制时移除最久未使用的
+3. 缓存管理：已加载的内容缓存到 Registry
 
 #### 4.4.3 Skill注册表 (skills/registry.py)
 
 **核心类**: `SkillRegistry`
 
-**LRU缓存机制**:
+**缓存机制**:
 
-基于 `OrderedDict` 实现 LRU 缓存，利用 `move_to_end()` 更新访问顺序、`popitem(last=False)` 淘汰最久未访问的条目：
+基于 `OrderedDict` 实现内容缓存：
 
-- `store_content()`: 存储内容，超过限制时移除最久未使用的
-- `get_content()`: 获取内容，通过 `move_to_end()` 更新访问顺序
-- `_evict_oldest()`: 淘汰最久未访问的内容，供 `_store_content_with_limit` 和 `set_max_loaded_skills` 复用
+- `store_content()`: 存储内容
+- `get_content()`: 获取内容
 - `find_matching_skill()`: 根据用户输入匹配触发词
 
 #### 4.4.4 Skill管理器 (skills/manager.py)
@@ -1619,7 +1616,7 @@ flowchart TD
 | `tools_config.yaml`   | 统一工具配置（内置工具、MCP、Skill）   |
 | `mcp_config.yaml`     | MCP服务器配置                 |
 | `prompt_config.yaml`  | 提示词配置（系统提示词文件路径）         |
-| `skills_config.yaml`  | Skill配置（目录、白名单、缓存限制）     |
+| `skills_config.yaml`  | Skill配置（目录、黑名单、缓存限制）     |
 | `project_config.yaml` | 项目配置（工作空间、根目录）           |
 | `test_config.yaml`    | 测试配置                     |
 | `sub_agents/*.yaml`   | SubAgent 配置文件            |
@@ -1830,9 +1827,7 @@ metadata:
 | --------------------------------- | ----------- |
 | `directory`                       | Skill文件目录   |
 | `auto_load`                       | 是否自动加载      |
-| `enabled_skills`                  | 白名单，为空则加载所有 |
-| `skill_loading.trigger_matching`  | 是否启用触发词匹配   |
-| `skill_loading.max_loaded_skills` | LRU缓存限制     |
+| `disabled_skills`                 | 黑名单，为空则加载所有 |
 
 ### 5.5 Agent配置 (config/agent\_config.yaml)
 
@@ -1921,7 +1916,7 @@ flowchart TD
 6. **权限继承**: 子Agent完全继承父角色权限，支持递归深度控制
 7. **Skill 条件激活**: 基于路径模式自动激活 Skills
 8. **Skill 动态发现**: 在文件操作时自动发现嵌套的 Skills 目录
-9. **LRU 缓存**: Skill 内容缓存机制，支持白名单过滤
+9. **LRU 缓存**: Skill 内容缓存机制，支持黑名单过滤
 10. **会话持久化**: 支持会话保存和恢复
 11. **日志优化**: 工具日志摘要模式，减少日志输出
 

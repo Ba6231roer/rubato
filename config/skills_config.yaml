@@ -1,13 +1,7 @@
 skills:
   directory: "skills"
   
-  enabled_skills:
-    - test-execution
-    - playwright-cli
-    - kb-query
-  
-  skill_loading:
-    max_loaded_skills: 3
+  disabled_skills: []
 
   self_improve:
     nudge_interval: 30

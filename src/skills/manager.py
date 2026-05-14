@@ -48,15 +48,13 @@ class SkillManager(SkillLoader):
     def __init__(
         self,
         skills_dir: str,
-        enabled_skills: Optional[List[str]] = None,
-        max_loaded_skills: int = 3,
+        disabled_skills: Optional[List[str]] = None,
         additional_dirs: Optional[List[str]] = None,
         cwd: str = "."
     ):
         super().__init__(
             skills_dir=skills_dir,
-            enabled_skills=enabled_skills,
-            max_loaded_skills=max_loaded_skills
+            disabled_skills=disabled_skills,
         )
         self.additional_dirs = additional_dirs or []
         self.cwd = cwd
@@ -206,6 +204,8 @@ class SkillManager(SkillLoader):
             try:
                 metadata, content = self.parser.parse_file(skill_file)
                 if metadata.name:
+                    if self.disabled_skills and metadata.name in self.disabled_skills:
+                        continue
                     if not self.registry.has_skill(metadata.name):
                         self.registry.register(metadata, content)
                         self.dynamic_skills.append(metadata)

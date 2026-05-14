@@ -62,6 +62,7 @@ __pycache__/
 # others
 logs/
 venv/
+browsers/
 dev_docs/
 .playwright-cli/
 .rubato/

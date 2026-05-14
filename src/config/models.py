@@ -288,10 +288,6 @@ class PromptConfig(BaseModel):
     variables: PromptVariables = PromptVariables()
 
 
-class SkillLoadingConfig(BaseModel):
-    max_loaded_skills: int = 3
-
-
 class BackgroundReviewConfig(BaseModel):
     enabled: bool = False
     max_iterations: int = 8
@@ -307,8 +303,7 @@ class SkillSelfImproveConfig(BaseModel):
 
 class SkillsConfig(BaseModel):
     directory: str = "skills"
-    enabled_skills: List[str] = []
-    skill_loading: SkillLoadingConfig = SkillLoadingConfig()
+    disabled_skills: List[str] = []
     self_improve: SkillSelfImproveConfig = SkillSelfImproveConfig()
 
 

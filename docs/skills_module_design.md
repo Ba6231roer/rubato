@@ -13,7 +13,7 @@ Skills 模块负责 Skill 的解析、注册、加载、匹配与动态管理，
 | 文件 | 核心类 | 职责 |
 |------|--------|------|
 | `parser.py` | `SkillMetadata`, `SkillParser` | 解析 Skill 文件 |
-| `registry.py` | `SkillRegistry` | 注册表与 LRU 缓存 |
+| `registry.py` | `SkillRegistry` | 注册表与内容缓存 |
 | `loader.py` | `SkillLoader` | 元数据加载 + 按需全文加载 |
 | `manager.py` | `ConditionalSkill`, `SkillManager` | 条件激活 + 动态发现 |
 
@@ -53,27 +53,25 @@ Skills 模块负责 Skill 的解析、注册、加载、匹配与动态管理，
 
 ### 2.3 SkillRegistry（registry.py）
 
-Skill 注册表，管理元数据存储和内容 LRU 缓存。
+Skill 注册表，管理元数据存储和内容缓存。
 
-**核心属性**：`skills: Dict[str, SkillMetadata]`（元数据字典）、`skill_contents: OrderedDict[str, str]`（LRU 内容缓存）、`max_loaded_skills: int`（缓存容量上限，默认 3）
+**核心属性**：`skills: Dict[str, SkillMetadata]`（元数据字典）、`skill_contents: Dict[str, str]`（内容缓存）
 
 | 方法 | 说明 |
 |------|------|
-| `register(metadata, content="")` | 注册元数据，有内容时写入 LRU 缓存 |
+| `register(metadata, content="")` | 注册元数据，有内容时写入缓存 |
 | `unregister(name)` | 注销 Skill，移除元数据和缓存 |
 | `find_matching_skill(user_input) -> Optional[str]` | 触发词匹配（大小写不敏感），返回首个匹配名称 |
-| `store_content(name, content)` | 存储内容（带 LRU 限制） |
-| `get_content(name) -> Optional[str]` | 获取内容，`move_to_end` 更新访问顺序 |
+| `store_content(name, content)` | 存储内容 |
+| `get_content(name) -> Optional[str]` | 获取内容 |
 
-辅助方法：`get_skill`、`get_skill_file`、`list_skills`、`has_skill`、`get_loaded_count`、`get_max_loaded_limit`、`set_max_loaded_skills`。
-
-**LRU 缓存机制**：基于 `OrderedDict`，访问时 `move_to_end` 更新顺序，淘汰时 `popitem(last=False)` 移除头部，插入前检查容量超限则循环淘汰。
+辅助方法：`get_skill`、`get_skill_file`、`list_skills`、`has_skill`、`get_loaded_count`。
 
 ### 2.4 SkillLoader（loader.py）
 
 Skill 加载器，负责元数据批量加载和全文按需加载。
 
-**核心属性**：`skills_dir: Path`（根目录）、`enabled_skills: Set[str]`（白名单）、`registry: SkillRegistry`、`parser: SkillParser`
+**核心属性**：`skills_dir: Path`（根目录）、`disabled_skills: Set[str]`（黑名单）、`registry: SkillRegistry`、`parser: SkillParser`
 
 | 方法 | 说明 |
 |------|------|
@@ -82,11 +80,11 @@ Skill 加载器，负责元数据批量加载和全文按需加载。
 | `get_skill_content_sync(skill_name) -> str` | 同步版 `load_full_skill`，供非 async 上下文使用 |
 | `get_all_skill_metadata() -> dict` | 获取所有 Skill 元数据字典 |
 
-内部通过 `_load_skills_from_dir(dir_path, skip_existing)` 递归扫描 `.md` 文件，受 `enabled_skills` 白名单过滤。
+内部通过 `_load_skills_from_dir(dir_path, skip_existing)` 递归扫描 `.md` 文件，受 `disabled_skills` 黑名单过滤。
 
 辅助方法：`get_registry`、`find_matching_skill`、`list_skills`、`get_loaded_skills_count`、`is_skill_enabled`、`has_skill`。
 
-**加载策略**：启动时仅加载 YAML 头（元数据），对话中按需加载完整内容，缓存由 Registry 的 LRU 策略管理。
+**加载策略**：启动时仅加载 YAML 头（元数据），对话中按需加载完整内容并缓存到 Registry。
 
 ### 2.5 ConditionalSkill（manager.py）
 
@@ -148,9 +146,9 @@ flowchart TD
     C --> D4[_user_skills_dir]
     D1 & D2 & D3 & D4 --> E[_load_skills_from_dir skip_existing=True]
     E --> F[递归扫描 *.md → parse_file]
-    F --> G{enabled_skills 过滤}
-    G -->|通过| H{skip_existing 检查}
-    G -->|不通过| J[跳过]
+    F --> G{disabled_skills 过滤}
+    G -->|不在列表| H{skip_existing 检查}
+    G -->|在列表中| J[跳过]
     H -->|已注册| J
     H -->|未注册| K[registry.register]
     K --> L[去重 → 分离条件 Skills]
@@ -164,12 +162,12 @@ flowchart TD
 ```mermaid
 flowchart TD
     A[load_full_skill] --> B{缓存命中?}
-    B -->|是| C[move_to_end 更新 LRU → 返回]
+    B -->|是| C[返回缓存内容]
     B -->|否| D[get_skill_file 获取路径]
     D --> E{路径存在?}
     E -->|否| F[返回空字符串]
     E -->|是| G[读取文件 → _split_yaml_header 剥离 YAML 头]
-    G --> H[store_content 写入 LRU 缓存 → 返回]
+    G --> H[store_content 写入缓存 → 返回]
 ```
 
 ### 4.3 条件激活流程
@@ -216,7 +214,7 @@ flowchart TD
 ## 5. 技术实现要点
 
 - **Skill 文件格式**：Markdown + YAML 头（`---` 分隔），YAML 头含元数据，正文为 Skill 内容；`paths` 非空时为条件 Skill
-- **白名单过滤**：`enabled_skills` 非空时仅加载指定 Skill，空时加载全部，过滤在解析后注册前执行
+- **黑名单过滤**：`disabled_skills` 非空时排除指定 Skill，空时加载全部，过滤在解析后注册前执行
 - **并行加载**：`load_skills` 使用 `asyncio.gather(return_exceptions=True)` 并行加载多来源，异常不中断其他来源
 - **skip_existing**：多来源并行加载时跳过已注册同名 Skill，确保先注册者不被覆盖
 - **路径匹配**：`ConditionalSkill` 使用 `pathspec.GitWildMatchPattern`，匹配时绝对路径转相对路径并统一分隔符为 `/`
