@@ -221,6 +221,7 @@ class LLMCaller:
         accumulated_content = ""
         accumulated_tool_call_chunks: Dict[int, Dict] = {}
         has_content = False
+        stream_usage = None
         
         delay = self.retry_initial_delay
         for retry_attempt in range(self.retry_max_count + 1):
@@ -233,6 +234,9 @@ class LLMCaller:
                 )
                 
                 async for chunk in stream:
+                    if chunk.usage:
+                        stream_usage = chunk.usage
+                    
                     if not chunk.choices:
                         continue
                     
@@ -320,6 +324,13 @@ class LLMCaller:
                     content=accumulated_content,
                     tool_calls=tool_calls
                 )
+                
+                if stream_usage:
+                    final_message.usage_metadata = {
+                        "input_tokens": stream_usage.prompt_tokens or 0,
+                        "output_tokens": stream_usage.completion_tokens or 0,
+                        "total_tokens": stream_usage.total_tokens or 0,
+                    }
                 
                 self._update_usage(final_message)
                 
@@ -527,6 +538,7 @@ class LLMCaller:
         
         if stream:
             params["stream"] = True
+            params["stream_options"] = {"include_usage": True}
         
         if use_tools and self.tools:
             if self._tool_schemas is None:
