@@ -135,6 +135,41 @@ class TestMessageSerializer(unittest.TestCase):
         self.assertIsInstance(deserialized[2], AIMessage)
         self.assertIsInstance(deserialized[3], ToolMessage)
 
+    def test_serialize_includes_token_count(self):
+        msg = HumanMessage(content="hello world")
+        d = MessageSerializer.serialize(msg)
+        self.assertIn("token_count", d)
+        self.assertIsInstance(d["token_count"], int)
+        self.assertGreater(d["token_count"], 0)
+
+    def test_serialize_token_count_approximate(self):
+        long_content = "a" * 100
+        msg = HumanMessage(content=long_content)
+        d = MessageSerializer.serialize(msg)
+        self.assertIn("token_count", d)
+        self.assertGreater(d["token_count"], 0)
+
+    def test_serialize_ai_message_uses_output_tokens(self):
+        msg = AIMessage(content="hello world response")
+        msg.usage_metadata = {"input_tokens": 50, "output_tokens": 42, "total_tokens": 92}
+        d = MessageSerializer.serialize(msg)
+        self.assertIn("token_count", d)
+        self.assertEqual(d["token_count"], 42)
+
+    def test_serialize_ai_message_without_usage_metadata(self):
+        msg = AIMessage(content="hello world response")
+        d = MessageSerializer.serialize(msg)
+        self.assertIn("token_count", d)
+        self.assertIsInstance(d["token_count"], int)
+        self.assertGreater(d["token_count"], 0)
+
+    def test_serialize_ai_message_with_zero_output_tokens(self):
+        msg = AIMessage(content="hello")
+        msg.usage_metadata = {"input_tokens": 10, "output_tokens": 0, "total_tokens": 10}
+        d = MessageSerializer.serialize(msg)
+        self.assertIn("token_count", d)
+        self.assertGreater(d["token_count"], 0)
+
 
 class TestSessionStorage(unittest.TestCase):
 
@@ -196,6 +231,28 @@ class TestSessionStorage(unittest.TestCase):
         loaded = self.storage.load_session("s1")
         self.assertEqual(len(loaded), 1)
         self.assertEqual(loaded[0].content, "first")
+
+    def test_append_messages_preserves_existing_timestamps(self):
+        msgs = [HumanMessage(content="hello")]
+        self.storage.save_session("s1", msgs, {"role": "tester"})
+
+        session_file = os.path.join(self.tmpdir, "s1.json")
+        with open(session_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        original_ts = data["messages"][0]["timestamp"]
+
+        import time
+        time.sleep(0.05)
+
+        new_msgs = [AIMessage(content="hi")]
+        self.storage.append_messages("s1", new_msgs)
+
+        with open(session_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        self.assertEqual(data["messages"][0]["timestamp"], original_ts)
+        self.assertEqual(data["messages"][1]["timestamp"][:4], str(2026))
+        self.assertEqual(len(data["messages"]), 2)
 
     def test_save_sub_session_ref(self):
         msgs = [HumanMessage(content="hello")]
@@ -305,6 +362,73 @@ class TestSessionStorage(unittest.TestCase):
         self.assertEqual(meta.sub_sessions[0].session_id, "sub-1")
         self.assertEqual(meta.sub_sessions[1].session_id, "sub-2")
         self.assertEqual(meta.sub_sessions[1].relation, "tool_call")
+
+    def test_append_messages_with_total_tokens(self):
+        msgs = [HumanMessage(content="hello")]
+        self.storage.save_session("s1", msgs, {"role": "tester"})
+
+        new_msgs = [AIMessage(content="hi")]
+        meta = self.storage.append_messages("s1", new_msgs, metadata={"total_tokens": 500})
+        self.assertEqual(meta.total_tokens, 500)
+
+        loaded_meta = self.storage.get_session_metadata("s1")
+        self.assertEqual(loaded_meta.total_tokens, 500)
+
+    def test_save_session_with_total_tokens(self):
+        msgs = [HumanMessage(content="hello"), AIMessage(content="hi")]
+        meta = self.storage.save_session("s1", msgs, {"role": "tester", "total_tokens": 1234})
+        self.assertEqual(meta.total_tokens, 1234)
+
+        loaded_meta = self.storage.get_session_metadata("s1")
+        self.assertEqual(loaded_meta.total_tokens, 1234)
+
+    def test_save_session_each_message_unique_timestamp(self):
+        import time
+        msgs = [HumanMessage(content="first")]
+        self.storage.save_session("s1", msgs)
+
+        time.sleep(0.05)
+        new_msgs = [AIMessage(content="second")]
+        self.storage.append_messages("s1", new_msgs)
+
+        time.sleep(0.05)
+        new_msgs2 = [HumanMessage(content="third")]
+        self.storage.append_messages("s1", new_msgs2)
+
+        session_file = os.path.join(self.tmpdir, "s1.json")
+        with open(session_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        ts0 = data["messages"][0]["timestamp"]
+        ts1 = data["messages"][1]["timestamp"]
+        ts2 = data["messages"][2]["timestamp"]
+        self.assertNotEqual(ts0, ts1)
+        self.assertNotEqual(ts1, ts2)
+
+    def test_old_session_without_token_count_compat(self):
+        session_file = os.path.join(self.tmpdir, "old-session.json")
+        old_data = {
+            "metadata": {
+                "session_id": "old-session",
+                "created_at": "2026-01-01T00:00:00",
+                "updated_at": "2026-01-01T00:00:00",
+                "message_count": 1,
+            },
+            "messages": [
+                {"type": "human", "content": "old message", "timestamp": "2026-01-01T00:00:00"},
+            ],
+        }
+        with open(session_file, "w", encoding="utf-8") as f:
+            json.dump(old_data, f, ensure_ascii=False)
+
+        new_msgs = [AIMessage(content="new")]
+        self.storage.append_messages("old-session", new_msgs)
+
+        with open(session_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        self.assertEqual(data["messages"][0]["timestamp"], "2026-01-01T00:00:00")
+        self.assertIn("token_count", data["messages"][1])
 
 
 if __name__ == "__main__":

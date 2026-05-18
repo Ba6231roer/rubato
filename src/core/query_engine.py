@@ -435,7 +435,7 @@ class QueryEngine:
                     try:
                         self._session_storage.append_messages(
                             self._session_id, new_msgs,
-                            metadata={"role": self.config.role_name, "model": self.config.model_name or ""},
+                            metadata={"role": self.config.role_name, "model": self.config.model_name or "", "total_tokens": self.total_usage.total_tokens},
                         )
                         self._last_persisted_count = len(self.mutable_messages)
                     except Exception:
@@ -1330,7 +1330,7 @@ class QueryEngine:
         try:
             self._session_storage.append_messages(
                 self._session_id, new_msgs,
-                metadata={"role": self.config.role_name, "model": self.config.model_name or ""},
+                metadata={"role": self.config.role_name, "model": self.config.model_name or "", "total_tokens": self.total_usage.total_tokens},
             )
             self._last_persisted_count = len(self.mutable_messages)
         except Exception:

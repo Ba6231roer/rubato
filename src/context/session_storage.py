@@ -14,6 +14,19 @@ from langchain_core.messages import (
     SystemMessage,
 )
 
+_tiktoken_encoding = None
+
+
+def _get_tiktoken_encoding():
+    global _tiktoken_encoding
+    if _tiktoken_encoding is None:
+        try:
+            import tiktoken
+            _tiktoken_encoding = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            _tiktoken_encoding = False
+    return _tiktoken_encoding
+
 
 @dataclass
 class SubSessionRef:
@@ -57,11 +70,30 @@ class MessageSerializer:
 
     @staticmethod
     def serialize(message: BaseMessage) -> Dict[str, Any]:
+        timestamp = getattr(message, "timestamp", "") or datetime.now().isoformat()
+
+        token_count = 0
+        if isinstance(message, AIMessage):
+            usage_metadata = getattr(message, "usage_metadata", None)
+            if usage_metadata and isinstance(usage_metadata, dict):
+                token_count = usage_metadata.get("output_tokens", 0) or 0
+
+        if not token_count:
+            encoding = _get_tiktoken_encoding()
+            if encoding:
+                try:
+                    token_count = len(encoding.encode(str(message.content)))
+                except Exception:
+                    token_count = len(str(message.content)) // 4
+            else:
+                token_count = len(str(message.content)) // 4
+
         msg_dict = {
             "type": message.type,
             "role": MessageSerializer.ROLE_TYPE_MAP.get(message.type, message.type),
             "content": message.content,
-            "timestamp": getattr(message, "timestamp", "") or datetime.now().isoformat(),
+            "timestamp": timestamp,
+            "token_count": token_count,
         }
 
         if isinstance(message, AIMessage):
@@ -339,20 +371,19 @@ class SessionStorage:
         with self._lock:
             session_file = self.storage_dir / f"{session_id}.json"
 
-            existing_messages = []
+            existing_msg_dicts = []
             existing_metadata = None
             if session_file.exists():
                 try:
                     with open(session_file, "r", encoding="utf-8") as f:
                         existing_data = json.load(f)
-                        existing_messages = MessageSerializer.deserialize_list(
-                            existing_data.get("messages", [])
-                        )
+                        existing_msg_dicts = existing_data.get("messages", [])
                         existing_metadata = existing_data.get("metadata", {})
                 except Exception:
                     pass
 
-            all_messages = existing_messages + new_messages
+            new_msg_dicts = MessageSerializer.serialize_list(new_messages)
+            all_msg_dicts = existing_msg_dicts + new_msg_dicts
 
             now = datetime.now().isoformat()
             created_at = existing_metadata.get("created_at", now) if existing_metadata else now
@@ -363,7 +394,7 @@ class SessionStorage:
                 session_id=session_id,
                 created_at=created_at,
                 updated_at=now,
-                message_count=len(all_messages),
+                message_count=len(all_msg_dicts),
                 total_tokens=merged_meta.get("total_tokens", 0),
                 tags=merged_meta.get("tags", []),
                 description=merged_meta.get("description", ""),
@@ -376,7 +407,7 @@ class SessionStorage:
 
             session_data = {
                 "metadata": asdict(session_metadata),
-                "messages": MessageSerializer.serialize_list(all_messages),
+                "messages": all_msg_dicts,
             }
 
             with open(session_file, "w", encoding="utf-8") as f:
