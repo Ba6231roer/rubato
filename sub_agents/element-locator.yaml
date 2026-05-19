@@ -1,6 +1,6 @@
 name: element-locator
 description: 元素定位专家，根据描述找到最佳选择器
-version: 1.0
+version: "1.0"
 
 system_prompt: |
   你是元素定位专家。

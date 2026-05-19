@@ -1,6 +1,6 @@
 name: knowledge-query
 description: 知识查询子Agent - 查询相关业务知识和历史功能设计
-version: 1.0
+version: "1.0"
 system_prompt: |
   你是知识查询助手。
   

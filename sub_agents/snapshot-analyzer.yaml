@@ -1,6 +1,6 @@
 name: snapshot-analyzer
 description: 页面快照分析专家，分析页面布局、识别可交互元素、推荐下一步操作
-version: 1.0
+version: "1.0"
 
 system_prompt: |
   你是页面快照分析专家，专门分析浏览器页面快照，为主任务提供决策支持。

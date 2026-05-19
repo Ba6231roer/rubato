@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ToolInheritanceMode(str, Enum):
@@ -189,6 +189,13 @@ class SubAgentDefinition(BaseModel):
         default_factory=dict,
         description="元数据"
     )
+    
+    @field_validator('version', mode='before')
+    @classmethod
+    def _coerce_version_to_str(cls, v):
+        if isinstance(v, (int, float)):
+            return str(v)
+        return v
     
     def get_system_prompt_content(self, base_dir: Optional[Path] = None) -> str:
         """获取系统提示词内容

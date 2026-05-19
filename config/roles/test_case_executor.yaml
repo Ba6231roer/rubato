@@ -20,8 +20,6 @@ tools:
         "write:*.txt": "allow"
   mcp:
     enabled: false
-  skills:
-    - playwright-cli
 metadata:
   version: "1.0"
   author: "Rubato Team"
