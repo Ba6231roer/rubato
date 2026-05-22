@@ -87,6 +87,26 @@ class RubatoAgent:
         
         self.compression_config = config.agent.message_compression
         
+        if (
+            role_config
+            and role_config.message_compression is not None
+        ):
+            role_comp = role_config.message_compression
+            comp = self.compression_config
+            for field_name in (
+                "keep_recent",
+                "autocompact_buffer_tokens",
+                "snip_keep_recent",
+                "tool_result_persist_threshold",
+                "tool_result_budget_per_message",
+                "large_message_char_threshold",
+                "max_consecutive_failures",
+                "skill_stale_timeout_seconds",
+            ):
+                value = getattr(role_comp, field_name, None)
+                if value is not None:
+                    setattr(comp, field_name, value)
+        
         sub_agent_recursion_limit = (
             role_config.execution.sub_agent_recursion_limit
             if role_config and role_config.execution and role_config.execution.sub_agent_recursion_limit

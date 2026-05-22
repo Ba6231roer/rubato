@@ -191,6 +191,17 @@ class RoleToolsConfig(BaseModel):
         return v
 
 
+class RoleMessageCompressionConfig(BaseModel):
+    keep_recent: Optional[int] = None
+    autocompact_buffer_tokens: Optional[int] = None
+    snip_keep_recent: Optional[int] = None
+    tool_result_persist_threshold: Optional[int] = None
+    tool_result_budget_per_message: Optional[int] = None
+    large_message_char_threshold: Optional[int] = None
+    max_consecutive_failures: Optional[int] = None
+    skill_stale_timeout_seconds: Optional[int] = None
+
+
 class RoleConfig(BaseModel):
     name: str
     description: str
@@ -200,6 +211,7 @@ class RoleConfig(BaseModel):
     available_tools: List[str] = []
     file_tools: Optional[RoleFileToolsConfig] = None
     tools: Optional[RoleToolsConfig] = None
+    message_compression: Optional[RoleMessageCompressionConfig] = None
     metadata: Optional[Dict[str, Any]] = None
 
     @field_validator('name')
@@ -329,6 +341,7 @@ class MessageCompressionConfig(BaseModel):
     snip_keep_recent: int = 6
     tool_result_persist_threshold: int = 50000
     tool_result_budget_per_message: int = 200000
+    large_message_char_threshold: int = 50000
     max_consecutive_failures: int = 3
     skill_stale_timeout_seconds: int = 300
 

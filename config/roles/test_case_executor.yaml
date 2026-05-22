@@ -4,7 +4,7 @@ system_prompt_file: prompts/roles/test_case_executor.txt
 model:
   inherit: true
 execution:
-  max_context_tokens: 200000
+  max_context_tokens: 60000
   timeout: 600
   recursion_limit: 1000
   sub_agent_recursion_limit: 500
@@ -20,6 +20,13 @@ tools:
         "write:*.txt": "allow"
   mcp:
     enabled: false
+message_compression:
+  keep_recent: 4
+  autocompact_buffer_tokens: 10000
+  snip_keep_recent: 3
+  tool_result_persist_threshold: 8000
+  tool_result_budget_per_message: 30000
+  large_message_char_threshold: 15000
 metadata:
   version: "1.0"
   author: "Rubato Team"
