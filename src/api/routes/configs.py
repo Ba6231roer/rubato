@@ -182,13 +182,12 @@ async def list_roles():
 
 @router.get("/tools", response_model=List[ToolInfo])
 async def list_tools():
-    from ...mcp.tools import get_all_tools
-    
     tools = []
-    for tool in get_all_tools():
-        tools.append(ToolInfo(
-            name=tool.name,
-            description=tool.description
-        ))
-    
+    state = get_app_state()
+    if state and state.agent and state.agent.tool_registry:
+        for tool in state.agent.tool_registry.get_all_tools():
+            tools.append(ToolInfo(
+                name=tool.name,
+                description=tool.description
+            ))
     return tools

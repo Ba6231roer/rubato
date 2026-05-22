@@ -8,7 +8,6 @@ from typing import Optional, Dict, List, Any
 from src.config.loader import ConfigLoader
 from src.config.validators import ConfigValidationError
 from src.mcp.client import MCPManager
-from src.mcp.tools import register_mcp_tools
 from src.skills.loader import SkillLoader
 from src.context.manager import ContextManager
 from src.core.agent import RubatoAgent
@@ -410,7 +409,6 @@ async def run_with_mcp(config, skill_loader, context_manager, config_loader) -> 
     mcp_manager = MCPManager(mcp_config)
     await mcp_manager.connect()
     tools = mcp_manager.get_tools()
-    register_mcp_tools(tools)
     print(f"MCP已连接，加载了 {len(tools)} 个工具")
     
     app_state = AppState()
@@ -514,7 +512,6 @@ async def run_web_mode(port: int = 8000) -> None:
             mcp_manager = MCPManager(mcp_config)
             await mcp_manager.connect()
             tools = mcp_manager.get_tools()
-            register_mcp_tools(tools)
             print(f"MCP已连接，加载了 {len(tools)} 个工具")
         except Exception as e:
             print(f"MCP连接失败: {e}")
