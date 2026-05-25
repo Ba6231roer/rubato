@@ -18,10 +18,13 @@ tools:
         "read:*": "allow"
         "write:*.md": "allow"
         "write:*.txt": "allow"
+        "write:webui_cache/*": "allow"
+        "write:*.yaml": "allow"
   mcp:
     enabled: false
   skills:
     - playwright-cli
+    - webui-cache
 metadata:
   version: "1.0"
   author: "Rubato Team"

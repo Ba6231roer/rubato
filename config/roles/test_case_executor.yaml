@@ -18,8 +18,12 @@ tools:
         "read:*": "allow"
         "write:*.md": "allow"
         "write:*.txt": "allow"
+        "write:webui_cache/*": "allow"
+        "write:*.yaml": "allow"
   mcp:
     enabled: false
+  skills:
+    - webui-cache
 message_compression:
   keep_recent: 4
   autocompact_buffer_tokens: 10000

@@ -1,0 +1,97 @@
+# =============================================================================
+# WebUI Cache 页面模板
+# =============================================================================
+# 此文件为新建页面缓存文件的参考模板。
+# 创建新缓存时，复制此模板并根据实际情况修改。
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# page: 页面基本信息
+# ---------------------------------------------------------------------------
+page:
+  system: ""                   # [必填] 所属系统名称，也是 webui_cache/ 下的子目录名
+  name: ""                     # [必填] 页面唯一名称，用于标识此缓存文件
+  url_patterns:                # [必填] 页面 URL 匹配模式列表
+    # 支持 * 通配符匹配多环境：
+    #   "https://www.test*.example.com/login" 匹配所有测试环境
+    #   "https://*.example.com/dashboard" 匹配任意子域名
+    - ""                       #   例: "https://example.com/login"
+  description: ""              # [必填] 页面的功能描述
+
+# ---------------------------------------------------------------------------
+# elements: 页面可交互元素的缓存列表
+# ---------------------------------------------------------------------------
+# 每个元素必须包含以下字段：
+#   id:          元素唯一标识符，在页面内不可重复，供 workflows 引用
+#   description: 元素的中文描述
+#   locator:     由 playwright-cli generate-locator 生成的稳定 locator
+#   action_type: 主要操作类型，可选值: click | fill | eval | select | hover
+#   usage:       使用说明，描述此元素的使用场景
+# ---------------------------------------------------------------------------
+elements:
+  # ---- 点击类元素示例 ----
+  - id: ""                     # 例: submit_button
+    description: ""            # 例: 提交按钮
+    locator: ""                # 例: "getByRole('button', { name: '提交' })"
+    action_type: click
+    usage: ""                  # 例: 点击提交表单
+
+  # ---- 输入类元素示例 ----
+  - id: ""                     # 例: search_input
+    description: ""            # 例: 搜索输入框
+    locator: ""                # 例: "getByRole('textbox', { name: '搜索' })"
+    action_type: fill
+    usage: ""                  # 例: 输入搜索关键词
+
+  # ---- JavaScript 执行类元素示例 ----
+  - id: ""                     # 例: page_title
+    description: ""            # 例: 页面标题
+    locator: ""                # 例: "page.locator('h1')"
+    action_type: eval
+    usage: ""                  # 例: 获取页面标题文本
+
+  # ---- 下拉选择类元素示例 ----
+  - id: ""                     # 例: category_select
+    description: ""            # 例: 分类下拉框
+    locator: ""                # 例: "getByRole('combobox', { name: '分类' })"
+    action_type: select
+    usage: ""                  # 例: 选择内容分类
+
+  # ---- 悬停类元素示例 ----
+  - id: ""                     # 例: menu_item
+    description: ""            # 例: 菜单项
+    locator: ""                # 例: "getByRole('menuitem', { name: '设置' })"
+    action_type: hover
+    usage: ""                  # 例: 悬停展开子菜单
+
+# ---------------------------------------------------------------------------
+# workflows: 预定义的多步骤操作流程（可选）
+# ---------------------------------------------------------------------------
+# 每个工作流包含以下字段：
+#   name:        流程名称
+#   description: 流程描述
+#   steps:       操作步骤列表，每步包含：
+#     action:      操作类型 (click | fill | eval | select | hover)
+#     element:     引用 elements 中定义的 id
+#     description: 此步骤的描述
+#     value:       可选，fill/select 操作的值
+#     condition:   可选，执行前提条件描述
+# ---------------------------------------------------------------------------
+workflows:
+  # ---- 流程示例 ----
+  - name: ""                   # 例: 搜索商品
+    description: ""            # 例: 在搜索框中输入关键词并搜索
+    steps:
+      - action: fill
+        element: ""            # 引用 elements 中的 id，例: search_input
+        value: ""              # 用于 fill/select 操作的值
+        description: ""        # 例: 输入搜索关键词
+      - action: click
+        element: ""            # 引用 elements 中的 id
+        description: ""        # 例: 点击搜索按钮
+
+# ---------------------------------------------------------------------------
+# 元数据
+# ---------------------------------------------------------------------------
+last_verified: ""              # [必填] 最后验证日期，格式: YYYY-MM-DD
+version: 1                     # [必填] 缓存版本号，每次修改递增
