@@ -698,23 +698,13 @@ class ChatPanel {
         const originalCount = data.original_count || '?';
         const compressedCount = data.compressed_count || '?';
         const trigger = data.trigger || '';
-        let bodyLines = `压缩前消息数: ${originalCount}\n压缩后消息数: ${compressedCount}`;
+        let info = `⚠️ 上下文已压缩 压缩前${originalCount}条→压缩后${compressedCount}条`;
         if (trigger) {
-            bodyLines += `\n触发原因: ${this.escapeHtml(trigger)}`;
+            info += ` 触发原因:${this.escapeHtml(trigger)}`;
         }
         msgEl.innerHTML = `
-            <div class="message-header">系统</div>
             <div class="message-content">
-                <div class="compression-card">
-                    <div class="compression-card-header" onclick="this.parentElement.classList.toggle('collapsed')">
-                        <span class="compression-card-icon">▶</span>
-                        <span class="compression-card-title">⚠️ 上下文已压缩</span>
-                        <span class="compression-card-summary">压缩前${originalCount}条 → 压缩后${compressedCount}条</span>
-                    </div>
-                    <div class="compression-card-body">
-                        <pre>${bodyLines}</pre>
-                    </div>
-                </div>
+                <span class="compression-notice">${info}</span>
             </div>
         `;
         this.messagesEl.appendChild(msgEl);

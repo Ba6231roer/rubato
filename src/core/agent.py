@@ -426,7 +426,19 @@ class RubatoAgent:
                             args.get('action', ''),
                             args.get('name', '')
                         )
-    
+
+    def _finalize_script_recording(self, user_input: str = "") -> None:
+        try:
+            import os
+            from ..tools.script_recorder import save_active_recording
+            result = save_active_recording(os.getcwd(), case_description=user_input)
+            if result:
+                import logging
+                logging.getLogger(__name__).info("Script recording saved: %s", result)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).debug("Script recording finalization skipped: %s", exc)
+
     def _load_system_prompt(self) -> str:
         if self.role_config and self.role_config.system_prompt_file:
             prompt_file = self.role_config.system_prompt_file
@@ -689,6 +701,7 @@ class RubatoAgent:
             })
             
             self._check_skill_manage_calls()
+            self._finalize_script_recording(user_input)
             
             if self._skill_nudge_interval > 0 and self._iters_since_skill_op >= self._skill_nudge_interval:
                 if self._should_run_background_review():
@@ -811,6 +824,7 @@ class RubatoAgent:
             })
             
             self._check_skill_manage_calls()
+            self._finalize_script_recording(user_input)
             
             if self._skill_nudge_interval > 0 and self._iters_since_skill_op >= self._skill_nudge_interval:
                 if self._should_run_background_review():
@@ -912,6 +926,7 @@ class RubatoAgent:
             })
             
             self._check_skill_manage_calls()
+            self._finalize_script_recording(user_input)
             
             if self._skill_nudge_interval > 0 and self._iters_since_skill_op >= self._skill_nudge_interval:
                 if self._should_run_background_review():

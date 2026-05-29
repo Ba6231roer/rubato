@@ -548,14 +548,14 @@ async def run_web_mode(port: int = 8000) -> None:
     app = create_app()
     
     print()
-    print(f"HTTP服务已启动: http://127.0.0.1:{port}")
+    print(f"HTTP服务已启动: http://0.0.0.0:{port}")
     print(f"Agent实例数: {app_state.get_instance_count()}")
     print("按 Ctrl+C 停止服务")
     print()
     
     uvicorn_config = uvicorn.Config(
         app,
-        host="127.0.0.1",
+        host="0.0.0.0",
         port=port,
         log_level="info"
     )

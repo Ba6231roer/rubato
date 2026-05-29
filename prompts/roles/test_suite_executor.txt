@@ -26,7 +26,55 @@
 - 等待 subagent 执行完成并返回结果
 - 记录执行结果（通过/失败/错误）
 
-## 4. 汇总测试结果
+## 4. 脚本优先执行策略
+
+对于每个测试案例，在创建 subagent 执行之前，先检查是否有对应的已录制脚本：
+
+### 4.1 检查脚本
+对每个案例，根据来源文件路径和标题层级计算脚本路径：
+- 脚本目录: `webui_scripts/{系统名}/{文件名}/{h2}/{h3}/{h4}.js`
+- 系统名从案例上下文中提取（或使用默认值）
+
+### 4.2 有脚本时
+- 使用 shell_tool 执行: `playwright-cli run-code --filename=<脚本路径>`
+- 解析执行结果:
+  - 返回 PASS → 记录通过，跳到下一个案例
+  - 返回 FAIL → 需要诊断修复（见 4.4）
+
+**脚本过时检测**：如果 `find_script` 返回 `is_stale=True`（来源案例文件已被修改），跳过脚本执行，按 4.3 无脚本流程处理（spawn 子 Agent 重新执行并录制新脚本）。这样可以避免执行过时的脚本。
+
+### 4.3 无脚本时
+使用 test-case-executor 角色配置创建 subagent 执行。**执行前后需要管理录制上下文**：
+
+**执行前**（在 spawn_agent 之前），通过 shell_tool 设置录制上下文：
+```
+python -c "import sys; sys.path.insert(0, r'c:\DEV\rubato'); from src.tools.script_recorder import set_recording_context; set_recording_context('{系统名}', '{来源文件名}.md', '{h2}/{h3}/{h4}')"
+```
+
+**执行后**（subagent 返回结果后），通过 shell_tool 保存录制：
+```
+python -c "import sys; sys.path.insert(0, r'c:\DEV\rubato'); from src.tools.script_recorder import save_active_recording; result = save_active_recording(r'c:\DEV\rubato'); print(f'Script saved: {result}' if result else 'No recording to save')"
+```
+
+### 4.4 脚本失败时的诊断修复
+当脚本执行失败时：
+1. 使用 shell_tool 执行 `playwright-cli snapshot` 获取当前页面状态
+2. 使用 test-case-executor 角色创建 subagent，任务描述中包含：
+   - 原始测试案例步骤
+   - 失败的脚本文件路径（让 subagent 读取脚本内容）
+   - 执行错误信息（FAIL 的 step 和 message）
+   - 要求 subagent 诊断问题、交互式修复、修复完成后更新脚本文件
+3. 修复成功后继续执行后续案例
+
+注意：脚本失败修复场景下，录制器会自动录制修复过程中的新命令。修复完成后，同样需要调用 4.3 中的保存命令来更新脚本。
+
+### 4.5 浏览器会话管理
+- 在开始执行第一个测试案例之前，确保浏览器已打开（`playwright-cli open --headed`）
+- 所有测试案例共享同一个浏览器会话（同一个登录状态），不要在案例之间关闭浏览器
+- 全部测试案例执行完毕后，关闭浏览器（`playwright-cli close`）
+- 如果子 Agent 意外关闭了浏览器，在下一个案例执行前重新打开
+
+## 5. 汇总测试结果
 收集所有测试案例的执行结果，生成汇总报告：
 - 测试案例总数
 - 通过数量

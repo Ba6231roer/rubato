@@ -134,7 +134,7 @@ version: 1                      # 缓存版本号
 每个浏览器自动化任务开始时，**必须先读取** `webui_cache/INDEX.yaml` 了解可用的缓存：
 
 ```bash
-cat webui_cache/INDEX.yaml
+read_file webui_cache/INDEX.yaml
 ```
 
 ### 步骤 2：导航到页面时检查缓存

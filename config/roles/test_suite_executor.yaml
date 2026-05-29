@@ -18,6 +18,8 @@ tools:
         "read:*": "allow"
         "write:*.md": "allow"
         "write:*.txt": "allow"
+        "write:webui_scripts/*": "allow"
+        "write:*.yaml": "allow"
   mcp:
     enabled: false
   skills:

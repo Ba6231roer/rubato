@@ -1,12 +1,21 @@
 import json
 import locale
 import logging
+import os
 import subprocess
 from typing import Any, List, Optional, Type, Union
 from langchain_core.callbacks import CallbackManagerForToolRun
 from langchain_core.tools import BaseTool
 from langchain_community.tools import ShellTool
 from pydantic import BaseModel, Field, model_validator
+
+from .script_recorder import get_script_recorder
+from .snapshot_interceptor import (
+    detect_snapshot_command,
+    detect_system_declaration,
+    process_snapshot_stdout,
+    set_system_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +101,44 @@ class RubatoShellTool(ShellTool):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
-            return self._decode_output(result.stdout)
+            output = self._decode_output(result.stdout)
         except subprocess.CalledProcessError as e:
-            return self._decode_output(e.stdout) if e.stdout else str(e)
+            output = self._decode_output(e.stdout) if e.stdout else str(e)
+
+        # Auto-detect system name from LLM declaration
+        system_decl = detect_system_declaration(commands)
+        if system_decl:
+            set_system_name(system_decl)
+
+        # Auto-cache on playwright-cli snapshot
+        if detect_snapshot_command(commands):
+            try:
+                project_root = os.getcwd()
+                logger.info(
+                    "Snapshot detected, command=%r, output_len=%d, output_preview=%s",
+                    commands[:200], len(output), output[:200],
+                )
+                count, cache_file = process_snapshot_stdout(output, project_root)
+                if count > 0 and cache_file:
+                    logger.info(
+                        "Snapshot interceptor: cached %d elements to %s",
+                        count, cache_file,
+                    )
+                else:
+                    logger.info(
+                        "Snapshot processing returned 0 elements (no cache written), project_root=%s",
+                        project_root,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "Snapshot interceptor failed: %s: %s", type(exc).__name__, exc
+                )
+
+        if "playwright-cli" in commands and not detect_snapshot_command(commands):
+            try:
+                recorder = get_script_recorder()
+                recorder.record_command(commands, output, success=True)
+            except Exception as exc:
+                logger.debug("Script recorder callback failed: %s", exc)
+
+        return output

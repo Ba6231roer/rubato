@@ -17,8 +17,11 @@ src/tools/
 ├── provider.py                # ToolProvider ABC + LocalToolProvider + ShellToolProvider
 ├── mcp_provider.py            # MCPToolProvider
 ├── docs.py                    # ToolDocsGenerator + 工具说明数据模型
-├── shell.py                   # RubatoShellTool + RubatoShellInput
+├── shell.py                   # RubatoShellTool + RubatoShellInput + 录制器回调
 ├── concurrency.py             # is_concurrency_safe 并发安全判定
+├── snapshot_interceptor.py    # playwright-cli snapshot 自动缓存到 webui_cache/
+├── script_recorder.py         # ScriptRecorder 脚本录制器（提取 Playwright 代码片段 + 去冗余 + 组装脚本）
+├── script_manager.py          # ScriptManager 脚本管理器（保存/查找/执行/去重/归档）
 └── file_tools/
     ├── __init__.py            # file_tools 模块导出
     ├── provider.py            # FileToolProvider
@@ -78,7 +81,63 @@ src/tools/
 
 **RubatoShellInput**：输入模型，`_unwrap_json_commands` 验证器自动处理 LLM 生成的 JSON 编码命令（单元素数组解包、多元素数组用 `&&` 连接）。
 
-**RubatoShellTool**：继承 langchain_community ShellTool，`name="terminal"`。`_run()` 直接使用 `subprocess.run` 执行命令
+**RubatoShellTool**：继承 langchain_community ShellTool，`name="terminal"`。`_run()` 直接使用 `subprocess.run` 执行命令。内部集成了两个回调钩子：
+- **snapshot 拦截**：检测到 playwright-cli snapshot 命令时，自动将页面元素缓存到 `webui_cache/`
+- **脚本录制回调**：检测到非 snapshot 的 playwright-cli 命令时，自动调用 `get_script_recorder().record_command()` 录制。两个回调均通过 try-except 保护，不影响 shell.py 核心命令执行逻辑
+
+### 2.4b Snapshot 拦截器 — `snapshot_interceptor.py`
+
+自动解析 playwright-cli snapshot 输出中的页面元素（aria 角色、文本、Locator），缓存到 `webui_cache/{system_name}/` 目录。维护全局系统名（`_current_system_name`），通过 `set_system_name()` / `get_system_name()` 供其他模块访问。
+
+**核心函数**：`detect_snapshot_command()` 检测 snapshot 命令；`detect_system_declaration()` 从命令中提取 SYSTEM 声明；`process_snapshot_stdout()` 解析并缓存；`url_to_system_name()` 从 URL 推断系统名。
+
+### 2.4c 脚本录制器 — `script_recorder.py`
+
+在 test_case_executor 交互式执行过程中，自动拦截 playwright-cli 命令输出，提取 `Ran Playwright code:` 后的 Playwright API 代码片段，组装为可直接通过 `playwright-cli run-code --filename` 执行的标准脚本。
+
+**ScriptRecorder 类**：
+
+| 属性/方法 | 说明 |
+|-----------|------|
+| `_buffer` | 录制缓冲区（`list[RecordEntry]`） |
+| `_case_system/source/heading` | 当前录制的案例上下文 |
+| `start_recording(system_name)` | 初始化录制会话 |
+| `record_command(command, output)` | 自动提取代码片段并追加到缓冲区（首次调用时自动 start） |
+| `stop_recording()` | 应用去冗余 → 组装脚本 → 返回脚本文本 |
+| `set_case_context(system, source, heading)` | 设置案例绑定上下文 |
+
+**去冗余机制**（两层）：
+1. **规则层**（`_apply_rule_dedup`）：排除 snapshot 命令、连续 goto 只保留最后、保留所有验证步骤。零 Token 消耗
+2. **LLM 评审层**（`_apply_llm_review`）：任务完成后将原始操作序列提交给独立 LLM 调用，返回 keep/remove/merge 标记。~2-4K tokens/次，失败时安全回退到规则层结果
+
+**模块级函数**：
+- `get_script_recorder(**kwargs)` — 单例工厂
+- `set_recording_context(system, source, heading)` — 设置录制上下文（可由 LLM 通过 shell_tool 调用）
+- `save_active_recording(project_root, case_description)` — 停止录制 + 去冗余 + 保存脚本 + 自动归档案例文本。由 agent.py 的 `_finalize_script_recording` 在任务完成时调用
+
+**脚本格式**：`async (page) => { ... }` 单函数，包含 META 头部、STEP 操作+验证块、PASS 返回值。与 `playwright-cli run-code --filename` 完全兼容。
+
+### 2.4d 脚本管理器 — `script_manager.py`
+
+负责脚本的保存、查找、执行、去重检测和案例文本归档。
+
+**ScriptManager 类**：
+
+| 方法 | 说明 |
+|------|------|
+| `save_script(system, source_file, heading_path, content)` | 按约定式路径保存脚本到 `webui_scripts/` |
+| `find_script(system, source_file, heading_path)` | 查找脚本，返回路径或 None |
+| `execute_script(script_path, session_name)` | 调用 `playwright-cli run-code --filename` 执行，解析返回结果 |
+| `check_duplicate(system, content)` | 基于步骤数 + locator Jaccard 相似度检测重复（>80% 视为更新） |
+| `update_index(script_path, ...)` | 更新 `webui_scripts/INDEX.yaml` 元数据 |
+| `save_case_text(system, case_title, case_text)` | 将自然语言案例保存到 `workspace/test_cases/{system}/` |
+
+**约定式目录镜像绑定**：脚本路径自动镜像 `workspace/test_cases/` 的目录结构。`webui_scripts/{系统名}/{文件名}/{h2}/{h3}/{h4}.js`。无需 ID 或映射表。
+
+**与 Agent 的集成**：
+- `agent.py._finalize_script_recording` 在 `run()` / `run_stream()` / `run_stream_structured()` 的任务完成后自动调用 `save_active_recording`
+- `test_suite_executor` 提示词描述了脚本优先策略：有脚本→直接执行；无脚本→spawn 子 Agent→自动录制→保存
+- 脚本失败时通过 snapshot + spawn test_case_executor 子 Agent 诊断修复
 
 ### 2.5 文件工具体系 — `file_tools/`
 

@@ -471,13 +471,13 @@ flowchart TD
 - **提取阶段**：`extract_task_intent` 中，无论消息长度是否超过 `full_threshold`，均强制进入 `mode=persisted`
 - **恢复阶段**：`build_recovery_message` 中的大输入快速路径——直接返回截断预览 + 文件路径，跳过 compressor 的二分查找截断逻辑，避免对超大输入进行不必要的 token 计数和截断操作
 
-### 5.12 压缩通知前端卡片化展示
+### 5.12 压缩通知前端展示
 
-Web 前端 `addCompressionNotice` 改为类似 tool-call 的可折叠卡片样式，提升压缩通知的可读性和交互体验：
+Web 前端 `addCompressionNotice` 以单行紧凑形式展示压缩通知，避免多次压缩时占用过多视觉空间：
 
-- **CSS 类**：`compression-card`（卡片容器）、`compression-card-header`（可点击折叠的标题栏）、`compression-card-body`（折叠/展开的内容区）
-- **消息字段**：`context_compressed` 消息新增 `trigger` 字段，标识压缩触发原因（如 `auto`、`manual`、`blocking` 等）
-- **交互**：点击 header 切换 body 的展开/折叠状态，默认折叠
+- **CSS 类**：`compression-notice`（单行文本样式）
+- **消息字段**：`context_compressed` 消息包含 `trigger` 字段，标识压缩触发原因（如 `auto`、`manual`、`blocking` 等）
+- **展示格式**：`⚠️ 上下文已压缩 压缩前X条→压缩后Y条 触发原因:auto`
 
 ***
 
