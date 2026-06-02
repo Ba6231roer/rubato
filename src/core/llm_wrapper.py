@@ -219,6 +219,7 @@ class LLMCaller:
             self.logger.log_request(full_messages, self.model)
         
         accumulated_content = ""
+        accumulated_reasoning = ""
         accumulated_tool_call_chunks: Dict[int, Dict] = {}
         has_content = False
         stream_usage = None
@@ -249,6 +250,9 @@ class LLMCaller:
                             "type": "text_delta",
                             "text": delta.content
                         }
+                    
+                    if hasattr(delta, 'reasoning_content') and delta.reasoning_content:
+                        accumulated_reasoning += delta.reasoning_content
                     
                     if delta.tool_calls:
                         for tc_chunk in delta.tool_calls:
@@ -283,6 +287,7 @@ class LLMCaller:
                         await asyncio.sleep(delay)
                         delay = min(delay * 2, self.retry_max_delay)
                         accumulated_content = ""
+                        accumulated_reasoning = ""
                         accumulated_tool_call_chunks = {}
                         has_content = False
                         continue
@@ -320,9 +325,13 @@ class LLMCaller:
                         }
                     }
                 
+                final_kwargs = {}
+                if accumulated_reasoning:
+                    final_kwargs["reasoning_content"] = accumulated_reasoning
                 final_message = AIMessage(
                     content=accumulated_content,
-                    tool_calls=tool_calls
+                    tool_calls=tool_calls,
+                    additional_kwargs=final_kwargs if final_kwargs else {},
                 )
                 
                 if stream_usage:
@@ -368,6 +377,7 @@ class LLMCaller:
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, self.retry_max_delay)
                     accumulated_content = ""
+                    accumulated_reasoning = ""
                     accumulated_tool_call_chunks = {}
                     has_content = False
                 else:
@@ -395,6 +405,7 @@ class LLMCaller:
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, self.retry_max_delay)
                     accumulated_content = ""
+                    accumulated_reasoning = ""
                     accumulated_tool_call_chunks = {}
                     has_content = False
                 else:
@@ -473,6 +484,9 @@ class LLMCaller:
                                 }
                             })
                     entry["tool_calls"] = openai_tool_calls
+                rc = msg.additional_kwargs.get("reasoning_content") if hasattr(msg, 'additional_kwargs') and msg.additional_kwargs else None
+                if rc:
+                    entry["reasoning_content"] = rc
                 result.append(entry)
             elif isinstance(msg, ToolMessage):
                 content = msg.content
@@ -495,6 +509,7 @@ class LLMCaller:
         
         message = choice.message
         content = message.content or ""
+        reasoning_content = getattr(message, 'reasoning_content', None) or ""
         
         tool_calls = []
         if message.tool_calls:
@@ -517,7 +532,10 @@ class LLMCaller:
                 "total_tokens": response.usage.total_tokens,
             }
         
-        aimessage = AIMessage(content=content, tool_calls=tool_calls)
+        additional_kwargs = {}
+        if reasoning_content:
+            additional_kwargs["reasoning_content"] = reasoning_content
+        aimessage = AIMessage(content=content, tool_calls=tool_calls, additional_kwargs=additional_kwargs)
         if usage_metadata:
             aimessage.usage_metadata = usage_metadata
         

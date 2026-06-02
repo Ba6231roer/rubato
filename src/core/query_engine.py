@@ -744,8 +744,11 @@ class QueryEngine:
                             )
                             continue
                         
+                        tool_result_content = self._persist_tool_result_if_needed(
+                            r["tool_result_content"], r["tool_name"], r["tool_call_id"]
+                        )
                         tool_result_msg = ToolMessage(
-                            content=r["tool_result_content"],
+                            content=tool_result_content,
                             tool_call_id=r["tool_call_id"]
                         )
                         self.mutable_messages.append(tool_result_msg)
@@ -817,8 +820,11 @@ class QueryEngine:
                                 tool_call_id
                             )
                             
+                            tool_result_content = self._persist_tool_result_if_needed(
+                                str(result), tool_name, tool_call_id
+                            )
                             tool_result_msg = ToolMessage(
-                                content=str(result),
+                                content=tool_result_content,
                                 tool_call_id=tool_call_id
                             )
                             self.mutable_messages.append(tool_result_msg)
@@ -876,6 +882,16 @@ class QueryEngine:
         elif isinstance(skill, str):
             return skill
         return None
+    
+    def _persist_tool_result_if_needed(self, content: str, tool_name: str, tool_call_id: str) -> str:
+        if self._tool_result_storage is None:
+            return content
+        original = content
+        content = self._tool_result_storage.maybe_persist_large_tool_result(content, tool_name, tool_call_id)
+        if content != original and self._content_replacement_state is not None:
+            self._content_replacement_state.mark_seen(tool_call_id)
+            self._content_replacement_state.set_replacement(tool_call_id, content)
+        return content
     
     def _check_budget_exceeded(self) -> bool:
         """检查预算是否超限"""

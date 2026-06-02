@@ -2,6 +2,7 @@ import json
 import locale
 import logging
 import os
+import re
 import subprocess
 from typing import Any, List, Optional, Type, Union
 from langchain_core.callbacks import CallbackManagerForToolRun
@@ -18,6 +19,60 @@ from .snapshot_interceptor import (
 )
 
 logger = logging.getLogger(__name__)
+
+_SR_COMMAND_PATTERN = re.compile(
+    r'python\s+(?:-c|/c)\s+".*script_recorder.*"',
+    re.IGNORECASE,
+)
+
+_SR_SET_CTX_PATTERN = re.compile(
+    r"set_recording_context\(\s*'([^']*)'\s*,\s*'([^']*)'\s*,\s*'([^']*)'\s*\)"
+)
+
+_SR_SAVE_PATTERN = re.compile(
+    r"save_active_recording\(\s*(r)?'([^']*)'\s*\)"
+)
+
+
+def _detect_script_recorder_command(commands: str) -> bool:
+    return bool(_SR_COMMAND_PATTERN.search(commands))
+
+
+def _handle_script_recorder_command(commands: str) -> Optional[str]:
+    from .script_recorder import set_recording_context, save_active_recording
+
+    code_match = re.search(
+        r'python\s+(?:-c|/c)\s+"([^"]*)"',
+        commands, re.IGNORECASE,
+    )
+    if not code_match:
+        return None
+    code = code_match.group(1)
+
+    if 'set_recording_context' in code:
+        match = _SR_SET_CTX_PATTERN.search(code)
+        if match:
+            system, source, heading = match.groups()
+            set_recording_context(system, source, heading)
+            logger.info(
+                "script_recorder in-process: set_recording_context(%r, %r, %r)",
+                system, source, heading,
+            )
+            return ""
+
+    elif 'save_active_recording' in code:
+        match = _SR_SAVE_PATTERN.search(code)
+        if match:
+            project_root = match.group(2)
+            result = save_active_recording(project_root)
+            if result:
+                msg = f"Script saved: {result}\r\n"
+            else:
+                msg = "No recording to save\r\n"
+            logger.info("script_recorder in-process: save_active_recording → %s", msg.strip())
+            return msg
+
+    return None
 
 
 class RubatoShellInput(BaseModel):
@@ -93,6 +148,15 @@ class RubatoShellTool(ShellTool):
     ) -> str:
         if isinstance(commands, list):
             commands = " && ".join(commands)
+
+        if _detect_script_recorder_command(commands):
+            try:
+                result = _handle_script_recorder_command(commands)
+                if result is not None:
+                    return result
+            except Exception as exc:
+                logger.debug("script_recorder in-process handling failed: %s", exc)
+
         try:
             result = subprocess.run(
                 commands,

@@ -103,6 +103,9 @@ class MessageSerializer:
                 msg_dict["response_metadata"] = message.response_metadata
             if hasattr(message, "id") and message.id:
                 msg_dict["id"] = message.id
+            if hasattr(message, "additional_kwargs") and message.additional_kwargs:
+                if "reasoning_content" in message.additional_kwargs:
+                    msg_dict["reasoning_content"] = message.additional_kwargs["reasoning_content"]
 
         if isinstance(message, ToolMessage):
             if hasattr(message, "tool_call_id"):
@@ -122,11 +125,16 @@ class MessageSerializer:
             tool_calls = msg_dict.get("tool_calls", [])
             response_metadata = msg_dict.get("response_metadata", {})
             msg_id = msg_dict.get("id")
+            reasoning_content = msg_dict.get("reasoning_content")
+            additional_kwargs = {}
+            if reasoning_content:
+                additional_kwargs["reasoning_content"] = reasoning_content
             return AIMessage(
                 content=content,
                 tool_calls=tool_calls,
                 response_metadata=response_metadata,
                 id=msg_id,
+                additional_kwargs=additional_kwargs if additional_kwargs else {},
             )
         elif msg_type == "tool":
             tool_call_id = msg_dict.get("tool_call_id", "")

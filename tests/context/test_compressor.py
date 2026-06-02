@@ -825,3 +825,59 @@ class TestPreprocessLargeMessages:
         result, freed = compressor.preprocess_large_messages(messages)
         assert "内容已截断" in result[0].content
         assert freed > 0
+
+
+class TestInstantPersistIntegration:
+    def test_instant_persist_replaces_content(self, tmp_path):
+        storage = ToolResultStorage(session_dir=str(tmp_path), persist_threshold=100)
+        state = ContentReplacementState()
+        large_content = "x" * 200
+        content = storage.maybe_persist_large_tool_result(large_content, "read_file", "tc_instant_1")
+        assert content != large_content
+        assert PERSISTED_OUTPUT_TAG in content
+        if content != large_content:
+            state.mark_seen("tc_instant_1")
+            state.set_replacement("tc_instant_1", content)
+        assert state.is_seen("tc_instant_1")
+        assert state.is_replaced("tc_instant_1")
+
+    def test_instant_persist_skips_small_content(self, tmp_path):
+        storage = ToolResultStorage(session_dir=str(tmp_path), persist_threshold=100)
+        small_content = "small"
+        content = storage.maybe_persist_large_tool_result(small_content, "read_file", "tc_instant_2")
+        assert content == small_content
+
+    def test_budget_skips_already_instant_persisted(self, tmp_path):
+        storage = ToolResultStorage(session_dir=str(tmp_path), persist_threshold=100, message_budget=50)
+        state = ContentReplacementState()
+        large_content = "a" * 200
+        replaced_content = storage.maybe_persist_large_tool_result(large_content, "read_file", "tc_budget_1")
+        state.mark_seen("tc_budget_1")
+        state.set_replacement("tc_budget_1", replaced_content)
+        messages = [
+            AIMessage(content="calling", tool_calls=[{"id": "tc_budget_1", "name": "read_file", "args": {}}]),
+            ToolMessage(content=replaced_content, tool_call_id="tc_budget_1", name="read_file"),
+        ]
+        result, newly_replaced = apply_tool_result_budget(messages, state, storage)
+        assert len(newly_replaced) == 0
+        assert result[1].content == replaced_content
+
+    def test_instant_persist_then_budget_handles_unseen(self, tmp_path):
+        storage = ToolResultStorage(session_dir=str(tmp_path), persist_threshold=100, message_budget=50)
+        state = ContentReplacementState()
+        content_a = "a" * 200
+        replaced_a = storage.maybe_persist_large_tool_result(content_a, "read_file", "tc_mix_1")
+        state.mark_seen("tc_mix_1")
+        state.set_replacement("tc_mix_1", replaced_a)
+        content_b = "b" * 200
+        messages = [
+            AIMessage(content="calling", tool_calls=[{"id": "tc_mix_1", "name": "read_file", "args": {}}]),
+            ToolMessage(content=replaced_a, tool_call_id="tc_mix_1", name="read_file"),
+            AIMessage(content="calling2", tool_calls=[{"id": "tc_mix_2", "name": "shell_tool", "args": {}}]),
+            ToolMessage(content=content_b, tool_call_id="tc_mix_2", name="shell_tool"),
+        ]
+        result, newly_replaced = apply_tool_result_budget(messages, state, storage)
+        assert len(newly_replaced) == 1
+        assert newly_replaced[0]["tool_use_id"] == "tc_mix_2"
+        assert result[1].content == replaced_a
+        assert PERSISTED_OUTPUT_TAG in result[3].content
