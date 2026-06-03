@@ -244,6 +244,8 @@ class QueryEngineConfig:
     task_intent_token_budget: int = 10000
     on_tool_executed: Optional[Callable[[str], None]] = None
     max_parallel_spawn: int = 1
+    skill_find_func: Optional[Callable[[str], Optional[str]]] = None
+    on_skill_needed: Optional[Callable[[str], Any]] = None
 
 
 class QueryEngine:
@@ -309,6 +311,8 @@ class QueryEngine:
         self.system_prompt_registry = config.system_prompt_registry
         self.conversation_history = config.conversation_history or ConversationHistory()
         self.skill_stale_timeout_seconds = config.skill_stale_timeout_seconds
+        self._skill_find_func = config.skill_find_func
+        self._on_skill_needed = config.on_skill_needed
         self._compression_enabled = config.compression_enabled
         self.logging_config = config.logging_config
 
@@ -583,6 +587,8 @@ class QueryEngine:
             self.conversation_history.append_assistant_step(llm_response, tool_results=[])
             
             self._update_usage_from_response(llm_response)
+            
+            await self._check_and_load_skills_from_llm_output(llm_response)
             
             if not hasattr(llm_response, 'tool_calls') or not llm_response.tool_calls:
                 no_tool_turn_count += 1
@@ -911,6 +917,35 @@ class QueryEngine:
         estimated_tokens = self._compressor.estimate_tokens(self.mutable_messages)
         warning_state = self._compressor.calculate_token_warning_state(estimated_tokens)
         return warning_state.get("is_at_blocking_limit", False)
+
+    async def _check_and_load_skills_from_llm_output(self, response: BaseMessage) -> None:
+        """检查 LLM 输出是否需要加载新 skill"""
+        if not self._skill_find_func or not self._on_skill_needed:
+            return
+
+        text_parts = []
+        if hasattr(response, 'content') and response.content:
+            text_parts.append(str(response.content))
+        if hasattr(response, 'tool_calls') and response.tool_calls:
+            for tc in response.tool_calls:
+                if hasattr(tc, 'args') and tc.args:
+                    text_parts.append(str(tc.args))
+
+        if not text_parts:
+            return
+
+        combined = " ".join(text_parts)
+        skill_name = self._skill_find_func(combined)
+        if not skill_name:
+            return
+
+        loaded = await self._on_skill_needed(skill_name)
+        if loaded:
+            self.logger.log_agent_action("skill_loaded_from_llm_output", {
+                "session_id": self._session_id,
+                "skill": skill_name,
+                "turn": self._current_turn,
+            })
 
     async def _run_compression_pipeline(self) -> Dict[str, Any]:
         if not self._compression_enabled or self._compressor is None:

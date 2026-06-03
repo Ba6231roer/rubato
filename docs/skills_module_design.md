@@ -80,6 +80,8 @@ Skill 加载器，负责元数据批量加载和全文按需加载。
 | `get_skill_content_sync(skill_name) -> str` | 同步版 `load_full_skill`，供非 async 上下文使用 |
 | `get_all_skill_metadata() -> dict` | 获取所有 Skill 元数据字典 |
 
+**Agent Loop 匹配**：`find_matching_skill` 同时被 QueryEngine 的 `_check_and_load_skills_from_llm_output` 调用，实现在 ReAct Loop 中对 LLM 输出的动态 skill 匹配。
+
 内部通过 `_load_skills_from_dir(dir_path, skip_existing)` 递归扫描 `.md` 文件，受 `disabled_skills` 黑名单过滤。
 
 辅助方法：`get_registry`、`find_matching_skill`、`list_skills`、`get_loaded_skills_count`、`is_skill_enabled`、`has_skill`。
@@ -170,7 +172,46 @@ flowchart TD
     G --> H[store_content 写入缓存 → 返回]
 ```
 
-### 4.3 条件激活流程
+### 4.3 Skill Trigger 在 ReAct Loop 中的匹配
+
+每轮 LLM 响应后、工具执行前，QueryEngine 自动检查 LLM 输出是否匹配到未加载的 skill。
+
+```mermaid
+sequenceDiagram
+    participant QE as QueryEngine
+    participant Loop as ReAct Loop
+    participant Registry as SkillRegistry
+    participant Agent as RubatoAgent
+
+    Loop->>QE: LLM 响应完成
+    QE->>QE: _check_and_load_skills_from_llm_output
+    QE->>QE: 提取 content + tool_calls 文本
+    QE->>Registry: skill_find_func(combined_text)
+    alt 匹配到未加载 skill
+        Registry-->>QE: skill_name
+        QE->>Agent: on_skill_needed(skill_name)
+        Agent->>Agent: load_full_skill + add_skill + rebuild
+        Agent-->>QE: loaded=True
+    else 已加载或未匹配
+        Registry-->>QE: None 或 has_skill=True
+    end
+    QE->>Loop: 继续工具执行
+```
+
+**配置参数**（QueryEngineConfig）：
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `skill_find_func` | `Optional[Callable]` | None | 触发词匹配函数（由 Agent 注入） |
+| `on_skill_needed` | `Optional[Callable]` | None | Skill 加载回调（由 Agent 注入） |
+
+**设计要点**：
+- 匹配源为 LLM 回复文本 + 工具调用参数文本
+- 复用 `SkillRegistry.find_matching_skill()` 两级匹配机制
+- 如果 `skill_find_func` 或 `on_skill_needed` 为 None，则跳过匹配（向后兼容）
+- LLM 输出为空时跳过匹配
+
+### 4.4 条件激活流程
 
 ```mermaid
 sequenceDiagram
@@ -195,7 +236,7 @@ sequenceDiagram
     SM-->>Agent: 返回激活的 Skill 名称列表
 ```
 
-### 4.4 动态发现流程
+### 4.5 动态发现流程
 
 ```mermaid
 flowchart TD

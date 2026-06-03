@@ -171,6 +171,21 @@ class RubatoAgent:
             except Exception:
                 pass
         
+        async def _on_skill_needed_from_loop(skill_name: str) -> bool:
+            """ReAct Loop 中 LLM 输出匹配到未加载 skill 时的回调"""
+            if self._system_prompt_registry.has_skill(skill_name):
+                self._system_prompt_registry.mark_skill_referenced(skill_name)
+                return False
+            skill_content = await self.skill_loader.load_full_skill(skill_name)
+            if not skill_content:
+                return False
+            self._system_prompt_registry.add_skill(skill_name, skill_content)
+            self._current_system_prompt = self._system_prompt_registry.build()
+            self._rebuild_query_engine()
+            self.context_manager.mark_skill_loaded(skill_name)
+            self.logger.log_agent_action("skill_loaded_from_loop", {"skill": skill_name})
+            return True
+
         query_config = QueryEngineConfig(
             cwd=str(self.config.project.root) if self.config.project else ".",
             llm=self.llm,
@@ -205,6 +220,8 @@ class RubatoAgent:
             role_name=self.get_role_name(),
             on_tool_executed=self._on_tool_executed,
             max_parallel_spawn=self._get_max_parallel_spawn(),
+            skill_find_func=self.skill_loader.find_matching_skill,
+            on_skill_needed=_on_skill_needed_from_loop,
         )
         
         return QueryEngine(query_config)
@@ -635,7 +652,7 @@ class RubatoAgent:
         
         skill_name = self.skill_loader.find_matching_skill(user_input)
         
-        if skill_name and not self.context_manager.is_skill_loaded(skill_name):
+        if skill_name and not self._system_prompt_registry.has_skill(skill_name):
             self.logger.log_agent_action("loading_skill", {"skill": skill_name})
             skill_content = await self.skill_loader.load_full_skill(skill_name)
             self._system_prompt_registry.add_skill(skill_name, skill_content)
@@ -748,7 +765,7 @@ class RubatoAgent:
         
         skill_name = self.skill_loader.find_matching_skill(user_input)
         
-        if skill_name and not self.context_manager.is_skill_loaded(skill_name):
+        if skill_name and not self._system_prompt_registry.has_skill(skill_name):
             self.logger.log_agent_action("loading_skill", {"skill": skill_name})
             skill_content = await self.skill_loader.load_full_skill(skill_name)
             self._system_prompt_registry.add_skill(skill_name, skill_content)
@@ -872,7 +889,7 @@ class RubatoAgent:
         
         skill_name = self.skill_loader.find_matching_skill(user_input)
         
-        if skill_name and not self.context_manager.is_skill_loaded(skill_name):
+        if skill_name and not self._system_prompt_registry.has_skill(skill_name):
             self.logger.log_agent_action("loading_skill", {"skill": skill_name})
             skill_content = await self.skill_loader.load_full_skill(skill_name)
             self._system_prompt_registry.add_skill(skill_name, skill_content)
